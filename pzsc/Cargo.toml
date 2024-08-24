@@ -1,0 +1,8 @@
+[package]
+name = "pzsc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = "1.39.3"
+zbus = { version = "4.4.0", features = ["tokio"] }

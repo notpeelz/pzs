@@ -1,0 +1,17 @@
+[package]
+name = "pzsd"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eyre = "0.6.12"
+gio = "0.20.1"
+gtk4 = "0.9.0"
+gtk4-layer-shell = "0.4.0"
+tokio = { version = "1.39.3", features = ["full"] }
+tracing = "0.1.40"
+zbus = { git = "https://github.com/dbus2/zbus.git", rev = "46fc45c67e7f9718ab0f41364b16cec9719c6528", features = ["tokio"], default-features = false }
+
+[[bin]]
+name = "pzsd"
+path = "src/init.rs"
