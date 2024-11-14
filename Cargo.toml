@@ -2,5 +2,5 @@
 resolver = "2"
 members = [
   "pzsd",
-  "pzsc",
+  "pzsc", "blah",
 ]
