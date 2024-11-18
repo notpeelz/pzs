@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -10,6 +12,7 @@ use gio::glib;
 use gio::prelude::*;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Layer, LayerShell};
+use notify::Watcher;
 use relm4::binding::U8Binding;
 use relm4::prelude::*;
 use relm4::typed_view::list::RelmListItem;
@@ -367,6 +370,7 @@ fn run_gtk(msg_rx: UnboundedReceiver<AppMsg>) {
 }
 
 pub(crate) async fn main() {
+  let xdg = xdg::BaseDirectories::new().unwrap();
   let (dbus_connection, dbus_shutdown) = match setup_dbus().await {
     Err(err) => {
       error!({ %err }, "dbus setup failed");
@@ -375,15 +379,62 @@ pub(crate) async fn main() {
     Ok(f) => f,
   };
 
-  let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
+  let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
 
-  let gtk = tokio::task::spawn_blocking(move || run_gtk(rx));
+  let gtk = tokio::task::spawn_blocking(move || run_gtk(msg_rx));
 
   tokio::task::spawn(async move {
-    loop {
-      tokio::time::sleep(Duration::from_secs(5)).await;
-      tx.send(AppMsg::UpdateApps("test".into()))
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut watcher = notify::INotifyWatcher::new(
+      move |event| {
+        let _ = notify_tx.send(event);
+      },
+      notify::Config::default(),
+    )
+    .unwrap();
+
+    for d in xdg.find_data_files("applications") {
+      watcher
+        .watch(&*d, notify::RecursiveMode::Recursive)
         .unwrap();
+    }
+
+    let dirty = AtomicBool::new(false);
+    loop {
+      let handle_notify = {
+        |x: notify::Result<notify::Event>| match x {
+          Ok(ev) if ev.kind.is_access() => {},
+          Ok(_) => {
+            dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+          },
+          Err(err) => {
+            tracing::warn!(
+              "an error occurred while watching applications dir: {err}"
+            );
+          },
+        }
+      };
+
+      tokio::select! {
+        x = notify_rx.recv() => {
+          let Some(r) = x else {
+            return;
+          };
+          handle_notify(r);
+          continue;
+        },
+        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+          if !dirty.load(std::sync::atomic::Ordering::SeqCst) {
+            continue;
+          }
+          tracing::info!("timeout after dirty");
+        },
+      }
+
+      msg_tx
+        .send(AppMsg::UpdateApps("test".into()))
+        .unwrap();
+      dirty.store(false, std::sync::atomic::Ordering::SeqCst);
     }
   });
 
