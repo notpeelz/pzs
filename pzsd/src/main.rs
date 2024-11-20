@@ -2,7 +2,6 @@ use std::future::Future;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -13,12 +12,10 @@ use gio::prelude::*;
 use gtk4::prelude::*;
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
-use relm4::binding::U8Binding;
 use relm4::prelude::*;
 use relm4::typed_view::list::RelmListItem;
 use relm4::typed_view::list::TypedListView;
 use relm4::RelmContainerExt;
-use relm4::RelmObjectExt;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::error;
@@ -39,23 +36,19 @@ enum AppMsg {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct MyListItem {
-  value: u8,
-  binding: U8Binding,
+  id: String,
+  name: String,
 }
 
-impl MyListItem {
-  fn new(value: u8) -> Self {
-    Self {
-      value,
-      binding: U8Binding::new(0),
-    }
-  }
-}
+// TODO:
+// impl MyListItem {
+//   fn new(value: u8) -> Self {
+//   }
+// }
 
 struct MyListItemWidgets {
+  image: gtk::Image,
   label: gtk::Label,
-  label2: gtk::Label,
-  button: gtk::CheckButton,
 }
 
 impl Drop for MyListItemWidgets {
@@ -70,47 +63,41 @@ impl RelmListItem for MyListItem {
 
   fn setup(_item: &gtk::ListItem) -> (gtk::Box, MyListItemWidgets) {
     relm4::view! {
-        my_box = gtk::Box {
-            #[name = "label"]
-            gtk::Label,
+      my_box = gtk::Box {
+        #[name = "image"]
+        gtk::Image,
 
-            #[name = "label2"]
-            gtk::Label,
-
-            #[name = "button"]
-            gtk::CheckButton,
-        }
+        #[name = "label"]
+        gtk::Label,
+      }
     }
 
-    let widgets = MyListItemWidgets {
-      label,
-      label2,
-      button,
-    };
+    // image.set_icon_size(gtk4::IconSize::Large);
+    image.set_pixel_size(64);
+
+    let widgets = MyListItemWidgets { image, label };
 
     (my_box, widgets)
   }
 
   fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
-    let MyListItemWidgets {
-      label,
-      label2,
-      button,
-    } = widgets;
+    let MyListItemWidgets { image, label } = widgets;
 
-    label.set_label(&format!("Value: {} ", self.value));
-    label2.add_write_only_binding(&self.binding, "label");
-    button.set_active(self.value % 2 == 0);
+    let icon = gtk4::IconTheme::default().lookup_icon(
+      &self.id,
+      &[],
+      128,
+      1,
+      gtk4::TextDirection::Ltr,
+      gtk4::IconLookupFlags::empty(),
+    );
+    image.set_paintable(Some(&icon));
+    label.set_label(&self.name);
   }
 }
 
 #[allow(dead_code)]
 struct AppWidgets {
-  // window: gtk::Window,
-  // vbox: gtk::Box,
-  // inc_button: gtk::Button,
-  // dec_button: gtk::Button,
-  // label: gtk::Label,
   my_view: gtk::ListView,
 }
 
@@ -124,8 +111,8 @@ impl SimpleComponent for App {
   fn init_root() -> Self::Root {
     gtk::Window::builder()
       .title("Simple app")
-      .default_width(300)
-      .default_height(100)
+      .default_width(350)
+      .default_height(350)
       .build()
   }
 
@@ -163,8 +150,17 @@ impl SimpleComponent for App {
       })
     };
 
-    let list_view_wrapper =
+    let mut list_view_wrapper =
       TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
+
+    list_view_wrapper.append(MyListItem {
+      id: "discord".into(),
+      name: "Discord".into(),
+    });
+    list_view_wrapper.append(MyListItem {
+      id: "firefox".into(),
+      name: "Firefox".into(),
+    });
 
     // list_view_wrapper.add_filter(|item| item.value % 2 == 0);
     // list_view_wrapper.set_filter_status(0, false);
@@ -174,6 +170,7 @@ impl SimpleComponent for App {
       handle: Some(handle),
     };
     let my_view = &model.list_view_wrapper.view;
+    sw.container_add(&my_view);
 
     let widgets = AppWidgets {
       my_view: my_view.clone(),
@@ -246,30 +243,11 @@ impl SimpleComponent for App {
     // widgets
     //   .label
     //   .set_label(&format!("Counter: {}", self.counter));
+
+    // TODO: draw paintable?
+    // https://gtk-rs.org/gtk4-rs/git/docs/gtk4/struct.IconTheme.html
   }
 }
-
-// https://github.com/wmww/gtk-layer-shell/blob/master/examples/simple-example.c
-// fn activate() {
-//   // let window = gtk4::Window::new();
-//   // window.init_layer_shell();
-//   // window.set_layer(Layer::Overlay);
-
-//   // // Set up a widget
-//   // // let label = gtk4::Label::new(None);
-//   // // let a = gio::glib::markup_escape_text("GTK <a>kek</a>");
-//   // // label.set_markup(&format!("<span font_desc=\"20.0\">{}</span>", a));
-//   // // label.connect_activate_link(|_, _| {
-//   // //   println!("clicked!");
-//   // //   gio::glib::Propagation::Stop
-//   // // });
-//   // // window.set_child(Some(&label));
-
-//   // window.set_visible(true);
-
-//   let app = RelmApp::new("relm4.example.simple");
-//   app.run::<App>(0);
-// }
 
 pub(crate) static SHUTDOWN_TX: OnceLock<broadcast::Sender<()>> =
   OnceLock::new();
@@ -431,6 +409,7 @@ pub(crate) async fn main() {
         },
       }
 
+      // TODO: deserialize desktop files
       msg_tx
         .send(AppMsg::UpdateApps("test".into()))
         .unwrap();
