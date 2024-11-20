@@ -249,8 +249,11 @@ impl SimpleComponent for App {
   }
 }
 
-pub(crate) static SHUTDOWN_TX: OnceLock<broadcast::Sender<()>> =
-  OnceLock::new();
+static SHUTDOWN_TX: OnceLock<broadcast::Sender<()>> = OnceLock::new();
+
+fn shutdown() {
+  SHUTDOWN_TX.get().unwrap().send(()).unwrap();
+}
 
 #[derive(Default)]
 struct TestInterface {}
@@ -258,7 +261,7 @@ struct TestInterface {}
 #[zbus::interface(name = "dev.peelz.pzs.Test")]
 impl TestInterface {
   fn shutdown(&mut self) -> zbus::fdo::Result<()> {
-    SHUTDOWN_TX.get().unwrap().send(()).unwrap();
+    shutdown();
     Ok(())
   }
 
@@ -361,7 +364,7 @@ pub(crate) async fn main() {
 
   let gtk = tokio::task::spawn_blocking(move || run_gtk(msg_rx));
 
-  tokio::task::spawn(async move {
+  let watcher = tokio::task::spawn(async move {
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut watcher = notify::INotifyWatcher::new(
       move |event| {
@@ -418,6 +421,9 @@ pub(crate) async fn main() {
   });
 
   tokio::select! {
+    _ = watcher => {
+      println!("watcher died");
+    },
     _ = dbus_shutdown => {
       println!("shutting down");
     },
@@ -426,5 +432,6 @@ pub(crate) async fn main() {
     },
   }
 
+  shutdown();
   drop(dbus_connection);
 }

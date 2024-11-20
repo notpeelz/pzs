@@ -14,6 +14,7 @@ fn main() {
   {
     Ok(rt) => {
       rt.block_on(crate::main::main());
+      rt.shutdown_background();
     },
     Err(err) => {
       error!("failed to create tokio runtime: {:?}", err);
