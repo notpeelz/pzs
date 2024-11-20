@@ -1478,10 +1478,13 @@ dependencies = [
  "gstreamer-app",
  "gtk4",
  "gtk4-layer-shell",
+ "itertools",
  "notify",
+ "once_cell",
  "relm4",
  "tokio",
  "tracing",
+ "walkdir",
  "xdg",
  "zbus 4.4.0 (git+https://github.com/dbus2/zbus.git?rev=46fc45c67e7f9718ab0f41364b16cec9719c6528)",
 ]

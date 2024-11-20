@@ -3,6 +3,7 @@
 use tracing::error;
 
 mod main;
+mod xdg;
 
 fn main() {
   match tokio::runtime::Builder::new_multi_thread()

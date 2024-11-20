@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use crate::xdg;
 use eyre::Context;
 use eyre::Result;
 use gio::glib;
@@ -31,12 +32,13 @@ struct App {
 
 #[derive(Debug)]
 enum AppMsg {
-  UpdateApps(String),
+  UpdateApps(Vec<xdg::Application>),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct MyListItem {
   id: String,
+  icon: String,
   name: String,
 }
 
@@ -84,7 +86,7 @@ impl RelmListItem for MyListItem {
     let MyListItemWidgets { image, label } = widgets;
 
     let icon = gtk4::IconTheme::default().lookup_icon(
-      &self.id,
+      &self.icon,
       &[],
       128,
       1,
@@ -155,10 +157,12 @@ impl SimpleComponent for App {
 
     list_view_wrapper.append(MyListItem {
       id: "discord".into(),
+      icon: "discord".into(),
       name: "Discord".into(),
     });
     list_view_wrapper.append(MyListItem {
       id: "firefox".into(),
+      icon: "firefox".into(),
       name: "Firefox".into(),
     });
 
@@ -228,7 +232,7 @@ impl SimpleComponent for App {
   fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
     match msg {
       AppMsg::UpdateApps(s) => {
-        println!("got UpdateApps: {s}");
+        println!("got UpdateApps: {s:#?}");
         // self.counter = self.counter.wrapping_add(1);
       },
     }
@@ -351,7 +355,6 @@ fn run_gtk(msg_rx: UnboundedReceiver<AppMsg>) {
 }
 
 pub(crate) async fn main() {
-  let xdg = xdg::BaseDirectories::new().unwrap();
   let (dbus_connection, dbus_shutdown) = match setup_dbus().await {
     Err(err) => {
       error!({ %err }, "dbus setup failed");
@@ -374,7 +377,7 @@ pub(crate) async fn main() {
     )
     .unwrap();
 
-    for d in xdg.find_data_files("applications") {
+    for d in xdg::BASEDIRS.find_data_files("applications") {
       watcher
         .watch(&*d, notify::RecursiveMode::Recursive)
         .unwrap();
@@ -413,9 +416,10 @@ pub(crate) async fn main() {
       }
 
       // TODO: deserialize desktop files
-      msg_tx
-        .send(AppMsg::UpdateApps("test".into()))
-        .unwrap();
+      let apps = xdg::read_applications()
+        .await
+        .expect("failed to read applications");
+      msg_tx.send(AppMsg::UpdateApps(apps)).unwrap();
       dirty.store(false, std::sync::atomic::Ordering::SeqCst);
     }
   });
