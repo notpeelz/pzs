@@ -23,6 +23,7 @@ use tracing::error;
 
 struct AppInit {
   msg_rx: UnboundedReceiver<AppMsg>,
+  apps: Vec<xdg::Application>,
 }
 
 struct App {
@@ -155,16 +156,25 @@ impl SimpleComponent for App {
     let mut list_view_wrapper =
       TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
 
-    list_view_wrapper.append(MyListItem {
-      id: "discord".into(),
-      icon: "discord".into(),
-      name: "Discord".into(),
-    });
-    list_view_wrapper.append(MyListItem {
-      id: "firefox".into(),
-      icon: "firefox".into(),
-      name: "Firefox".into(),
-    });
+    for app in init.apps {
+      let no_display = app.desktop_file.no_display.unwrap_or(false);
+      if no_display {
+        continue;
+      }
+
+      let Some(icon) = app.desktop_file.icon else {
+        continue;
+      };
+      let Some(name) = app.desktop_file.name else {
+        continue;
+      };
+
+      list_view_wrapper.append(MyListItem {
+        id: app.id,
+        icon,
+        name,
+      });
+    }
 
     // list_view_wrapper.add_filter(|item| item.value % 2 == 0);
     // list_view_wrapper.set_filter_status(0, false);
@@ -320,7 +330,7 @@ async fn setup_dbus() -> Result<(zbus::Connection, impl Future<Output = ()>)> {
   Ok((connection, f))
 }
 
-fn run_gtk(msg_rx: UnboundedReceiver<AppMsg>) {
+fn run_gtk(app_init: AppInit) {
   let c = glib::MainContext::default();
   let ml = glib::MainLoop::new(Some(&c), false);
 
@@ -347,7 +357,7 @@ fn run_gtk(msg_rx: UnboundedReceiver<AppMsg>) {
     gtk4::init().expect("failed to initialize gtk");
 
     let app = RelmApp::new("relm4.example.simple");
-    app.run::<App>(AppInit { msg_rx });
+    app.run::<App>(app_init);
 
     ml.run();
   })
@@ -365,7 +375,12 @@ pub(crate) async fn main() {
 
   let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
 
-  let gtk = tokio::task::spawn_blocking(move || run_gtk(msg_rx));
+  let apps = xdg::read_applications()
+    .await
+    .expect("failed to read applications");
+  let app_init = AppInit { msg_rx, apps };
+
+  let gtk = tokio::task::spawn_blocking(move || run_gtk(app_init));
 
   let watcher = tokio::task::spawn(async move {
     let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();

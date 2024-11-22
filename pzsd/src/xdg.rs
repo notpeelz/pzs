@@ -1,8 +1,12 @@
+use core::str;
 use std::{collections::HashMap, path::PathBuf};
 
-use eyre::Result;
+use eyre::{Context, OptionExt, Result};
+use ini::Ini;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use tokio::io::AsyncReadExt;
+use tracing::warn;
 use walkdir::WalkDir;
 
 pub static BASEDIRS: Lazy<::xdg::BaseDirectories> =
@@ -11,12 +15,60 @@ pub static BASEDIRS: Lazy<::xdg::BaseDirectories> =
 #[derive(Debug)]
 pub struct Application {
   pub id: String,
+  pub desktop_path: PathBuf,
   pub desktop_file: DesktopFile,
 }
 
 #[derive(Debug)]
 pub struct DesktopFile {
-  pub path: PathBuf,
+  pub no_display: Option<bool>,
+  pub icon: Option<String>,
+  pub name: Option<String>,
+}
+
+impl DesktopFile {
+  async fn from_reader<R: tokio::io::AsyncRead + Unpin>(
+    mut r: R,
+  ) -> Result<DesktopFile> {
+    let mut buf = Vec::<u8>::new();
+    r.read_to_end(&mut buf).await?;
+
+    let ini = {
+      let s = str::from_utf8(&buf)
+        .wrap_err("file contains invalid utf-8 characters")?;
+      Ini::load_from_str_opt(
+        s,
+        ini::ParseOption {
+          enabled_escape: true,
+          enabled_quote: false,
+        },
+      )
+      .wrap_err("failed to parse file")?
+    };
+
+    let entry = ini
+      .section(Some("Desktop Entry"))
+      .ok_or_eyre("section 'Desktop Entry' doesn't exist")?;
+
+    let no_display = match entry
+      .get("NoDisplay")
+      .map(|x| x.to_ascii_lowercase())
+      .as_deref()
+    {
+      Some("true") => Some(true),
+      Some("false") => Some(false),
+      _ => None,
+    };
+
+    let icon = entry.get("Icon").map(|x| x.to_owned());
+    let name = entry.get("Name").map(|x| x.to_owned());
+
+    Ok(DesktopFile {
+      no_display,
+      icon,
+      name,
+    })
+  }
 }
 
 pub async fn read_applications() -> Result<Vec<Application>> {
@@ -63,17 +115,38 @@ pub async fn read_applications() -> Result<Vec<Application>> {
           .collect::<String>()
       };
 
+      let desktop_path = entry.into_path();
+
+      let desktop_file = match read_desktop_file(&desktop_path).await {
+        Ok(f) => f,
+        Err(r) => {
+          let r = r.wrap_err(format!(
+            "failed to read desktop file: {}",
+            desktop_path.to_string_lossy()
+          ));
+          warn!("{r}");
+          continue;
+        },
+      };
+
       m.insert(
         app_id.clone(),
         Application {
           id: app_id,
-          desktop_file: DesktopFile {
-            path: entry.into_path(),
-          },
+          desktop_path,
+          desktop_file,
         },
       );
     }
   }
 
   Ok(m.into_values().collect::<Vec<_>>())
+}
+
+async fn read_desktop_file(desktop_path: &PathBuf) -> Result<DesktopFile> {
+  let r = tokio::fs::File::open(desktop_path).await?;
+
+  DesktopFile::from_reader(r)
+    .await
+    .wrap_err("invalid desktop file")
 }
