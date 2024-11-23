@@ -20,18 +20,18 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::error;
 
-struct AppInit {
-  msg_rx: UnboundedReceiver<AppMsg>,
+struct AppLauncherInit {
+  msg_rx: UnboundedReceiver<AppLauncherMsg>,
   apps: Vec<xdg::Application>,
 }
 
-struct App {
+struct AppLauncher {
   list_view_wrapper: TypedListView<MyListItem, gtk4::SingleSelection>,
   handle: Option<glib::JoinHandle<()>>,
 }
 
 #[derive(Debug)]
-enum AppMsg {
+enum AppLauncherMsg {
   UpdateApps(Vec<xdg::Application>),
 }
 
@@ -118,15 +118,42 @@ impl RelmListItem for MyListItem {
 }
 
 #[allow(dead_code)]
-struct AppWidgets {
+struct AppLauncherWidgets {
   my_view: gtk::ListView,
 }
 
-impl SimpleComponent for App {
-  type Init = AppInit;
-  type Input = AppMsg;
+fn update_list_view(
+  list_view: &mut TypedListView<MyListItem, gtk::SingleSelection>,
+  apps: &[xdg::Application],
+) {
+  list_view.clear();
+  for app in apps.into_iter() {
+    let desktop_file = &app.desktop_file;
+    let no_display = desktop_file.no_display.unwrap_or(false);
+    if no_display {
+      continue;
+    }
+
+    let Some(ref icon) = desktop_file.icon else {
+      continue;
+    };
+    let Some(ref name) = desktop_file.name else {
+      continue;
+    };
+
+    list_view.append(MyListItem {
+      id: app.id.clone(),
+      icon: icon.clone(),
+      name: name.clone(),
+    });
+  }
+}
+
+impl SimpleComponent for AppLauncher {
+  type Init = AppLauncherInit;
+  type Input = AppLauncherMsg;
   type Output = ();
-  type Widgets = AppWidgets;
+  type Widgets = AppLauncherWidgets;
   type Root = gtk::Window;
 
   fn init_root() -> Self::Root {
@@ -174,37 +201,19 @@ impl SimpleComponent for App {
     let mut list_view_wrapper =
       TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
 
-    for app in init.apps {
-      let no_display = app.desktop_file.no_display.unwrap_or(false);
-      if no_display {
-        continue;
-      }
-
-      let Some(icon) = app.desktop_file.icon else {
-        continue;
-      };
-      let Some(name) = app.desktop_file.name else {
-        continue;
-      };
-
-      list_view_wrapper.append(MyListItem {
-        id: app.id,
-        icon,
-        name,
-      });
-    }
-
     // list_view_wrapper.add_filter(|item| item.value % 2 == 0);
     // list_view_wrapper.set_filter_status(0, false);
 
-    let model = App {
+    update_list_view(&mut list_view_wrapper, &init.apps);
+
+    let model = AppLauncher {
       list_view_wrapper,
       handle: Some(handle),
     };
     let my_view = &model.list_view_wrapper.view;
     sw.container_add(&my_view);
 
-    let widgets = AppWidgets {
+    let widgets = AppLauncherWidgets {
       my_view: my_view.clone(),
     };
 
@@ -259,9 +268,11 @@ impl SimpleComponent for App {
 
   fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
     match msg {
-      AppMsg::UpdateApps(s) => {
+      AppLauncherMsg::UpdateApps(s) => {
         println!("got UpdateApps: {s:#?}");
-        // self.counter = self.counter.wrapping_add(1);
+        // TODO: postpone this until we hide/close the window
+        self.list_view_wrapper.clear();
+        update_list_view(&mut self.list_view_wrapper, &*s);
       },
     }
   }
@@ -348,7 +359,7 @@ async fn setup_dbus() -> Result<(zbus::Connection, impl Future<Output = ()>)> {
   Ok((connection, f))
 }
 
-fn run_gtk(app_init: AppInit) {
+fn run_gtk(app_init: AppLauncherInit) {
   let c = glib::MainContext::default();
   let ml = glib::MainLoop::new(Some(&c), false);
 
@@ -375,7 +386,7 @@ fn run_gtk(app_init: AppInit) {
     gtk4::init().expect("failed to initialize gtk");
 
     let app = RelmApp::new("relm4.example.simple");
-    app.run::<App>(app_init);
+    app.run::<AppLauncher>(app_init);
 
     ml.run();
   })
@@ -391,12 +402,13 @@ pub(crate) async fn main() {
     Ok(f) => f,
   };
 
-  let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel::<AppMsg>();
+  let (msg_tx, msg_rx) =
+    tokio::sync::mpsc::unbounded_channel::<AppLauncherMsg>();
 
   let apps = xdg::read_applications()
     .await
     .expect("failed to read applications");
-  let app_init = AppInit { msg_rx, apps };
+  let app_init = AppLauncherInit { msg_rx, apps };
 
   let gtk = tokio::task::spawn_blocking(move || run_gtk(app_init));
 
@@ -448,11 +460,12 @@ pub(crate) async fn main() {
         },
       }
 
-      // TODO: deserialize desktop files
       let apps = xdg::read_applications()
         .await
         .expect("failed to read applications");
-      msg_tx.send(AppMsg::UpdateApps(apps)).unwrap();
+      msg_tx
+        .send(AppLauncherMsg::UpdateApps(apps))
+        .unwrap();
       dirty.store(false, std::sync::atomic::Ordering::SeqCst);
     }
   });
