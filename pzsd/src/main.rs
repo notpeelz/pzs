@@ -9,8 +9,7 @@ use crate::xdg;
 use eyre::Context;
 use eyre::Result;
 use gio::glib;
-use gio::prelude::*;
-use gtk4::prelude::*;
+use gtk4::IconPaintable;
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
 use relm4::prelude::*;
@@ -76,7 +75,7 @@ impl RelmListItem for MyListItem {
     }
 
     // image.set_icon_size(gtk4::IconSize::Large);
-    image.set_pixel_size(64);
+    image.set_pixel_size(48);
 
     let widgets = MyListItemWidgets { image, label };
 
@@ -86,14 +85,33 @@ impl RelmListItem for MyListItem {
   fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
     let MyListItemWidgets { image, label } = widgets;
 
-    let icon = gtk4::IconTheme::default().lookup_icon(
-      &self.icon,
-      &[],
-      128,
-      1,
-      gtk4::TextDirection::Ltr,
-      gtk4::IconLookupFlags::empty(),
-    );
+    let icon = if self.icon.starts_with('/') {
+      IconPaintable::for_file(&gio::File::for_path(&self.icon), 48, 1)
+    } else {
+      let theme =
+        gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().unwrap());
+
+      if theme.has_icon(&self.icon) {
+        theme.lookup_icon(
+          &self.icon,
+          &[],
+          48,
+          1,
+          gtk4::TextDirection::None,
+          gtk4::IconLookupFlags::empty(),
+        )
+      } else {
+        theme.lookup_icon(
+          "application-x-executable",
+          &[],
+          48,
+          1,
+          gtk4::TextDirection::None,
+          gtk4::IconLookupFlags::empty(),
+        )
+      }
+    };
+
     image.set_paintable(Some(&icon));
     label.set_label(&self.name);
   }
