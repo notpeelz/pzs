@@ -12,14 +12,14 @@ use walkdir::WalkDir;
 pub static BASEDIRS: Lazy<::xdg::BaseDirectories> =
   Lazy::new(|| ::xdg::BaseDirectories::new().unwrap());
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Application {
   pub id: String,
   pub desktop_path: PathBuf,
   pub desktop_file: DesktopFile,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DesktopFile {
   pub no_display: Option<bool>,
   pub icon: Option<String>,

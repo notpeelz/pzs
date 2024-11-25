@@ -2,13 +2,13 @@ use std::future::Future;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::xdg;
 use eyre::Context;
 use eyre::Result;
 use gio::glib;
+use gtk4::prelude::WidgetExt;
 use gtk4::IconPaintable;
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
@@ -17,22 +17,31 @@ use relm4::typed_view::list::RelmListItem;
 use relm4::typed_view::list::TypedListView;
 use relm4::RelmContainerExt;
 use tokio::sync::broadcast;
-use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::error;
 
+struct DbusInit {
+  msg_tx: broadcast::Sender<AppMsg>,
+  msg_rx: broadcast::Receiver<AppMsg>,
+}
+
 struct AppLauncherInit {
-  msg_rx: UnboundedReceiver<AppLauncherMsg>,
+  visible: bool,
+  msg_tx: broadcast::Sender<AppMsg>,
+  msg_rx: broadcast::Receiver<AppMsg>,
   apps: Vec<xdg::Application>,
 }
 
 struct AppLauncher {
+  visible: bool,
   list_view_wrapper: TypedListView<MyListItem, gtk4::SingleSelection>,
   handle: Option<glib::JoinHandle<()>>,
 }
 
-#[derive(Debug)]
-enum AppLauncherMsg {
+#[derive(Debug, Clone)]
+enum AppMsg {
+  Shutdown,
   UpdateApps(Vec<xdg::Application>),
+  SetVisibility(bool),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -74,7 +83,6 @@ impl RelmListItem for MyListItem {
       }
     }
 
-    // image.set_icon_size(gtk4::IconSize::Large);
     image.set_pixel_size(48);
 
     let widgets = MyListItemWidgets { image, label };
@@ -119,7 +127,8 @@ impl RelmListItem for MyListItem {
 
 #[allow(dead_code)]
 struct AppLauncherWidgets {
-  my_view: gtk::ListView,
+  list_view: gtk::ListView,
+  window: gtk4::Window,
 }
 
 fn update_list_view(
@@ -151,7 +160,7 @@ fn update_list_view(
 
 impl SimpleComponent for AppLauncher {
   type Init = AppLauncherInit;
-  type Input = AppLauncherMsg;
+  type Input = AppMsg;
   type Output = ();
   type Widgets = AppLauncherWidgets;
   type Root = gtk::Window;
@@ -161,6 +170,7 @@ impl SimpleComponent for AppLauncher {
       .title("Simple app")
       .default_width(350)
       .default_height(350)
+      .visible(false)
       .build()
   }
 
@@ -172,6 +182,7 @@ impl SimpleComponent for AppLauncher {
   ) -> ComponentParts<Self> {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
+    window.set_visible(init.visible);
 
     let vbox = gtk::Box::builder()
       .orientation(gtk::Orientation::Vertical)
@@ -189,8 +200,14 @@ impl SimpleComponent for AppLauncher {
       let mut msg_rx = init.msg_rx;
       relm4::spawn_local(async move {
         loop {
-          let Some(msg) = msg_rx.recv().await else {
-            break;
+          let msg = match msg_rx.recv().await {
+            Ok(msg) => msg,
+            Err(broadcast::error::RecvError::Closed) => {
+              break;
+            },
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+              continue;
+            },
           };
 
           sender.input(msg);
@@ -207,49 +224,19 @@ impl SimpleComponent for AppLauncher {
     update_list_view(&mut list_view_wrapper, &init.apps);
 
     let model = AppLauncher {
+      visible: init.visible,
       list_view_wrapper,
       handle: Some(handle),
     };
-    let my_view = &model.list_view_wrapper.view;
-    sw.container_add(&my_view);
+    let list_view = &model.list_view_wrapper.view;
+    sw.container_add(&list_view);
 
     let widgets = AppLauncherWidgets {
-      my_view: my_view.clone(),
+      list_view: list_view.clone(),
+      window,
     };
 
     ComponentParts { model, widgets }
-
-    // let inc_button = gtk::Button::with_label("Increment");
-    // let dec_button = gtk::Button::with_label("Decrement");
-
-    // let label = gtk::Label::new(Some(&format!("Counter: {}", model.counter)));
-    // label.set_margin_all(5);
-
-    // window.set_child(Some(&vbox));
-    // vbox.set_margin_all(5);
-    // vbox.append(&inc_button);
-    // vbox.append(&dec_button);
-    // vbox.append(&label);
-
-    // inc_button.connect_clicked(clone!(
-    //   #[strong]
-    //   sender,
-    //   move |_| {
-    //     sender.input(Msg::Increment);
-    //   }
-    // ));
-
-    // dec_button.connect_clicked(clone!(
-    //   #[strong]
-    //   sender,
-    //   move |_| {
-    //     sender.input(Msg::Decrement);
-    //   }
-    // ));
-
-    // let widgets = AppWidgets { label };
-
-    // ComponentParts { model, widgets }
   }
 
   fn shutdown(
@@ -268,11 +255,13 @@ impl SimpleComponent for AppLauncher {
 
   fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
     match msg {
-      AppLauncherMsg::UpdateApps(s) => {
-        println!("got UpdateApps: {s:#?}");
-        // TODO: postpone this until we hide/close the window
-        self.list_view_wrapper.clear();
-        update_list_view(&mut self.list_view_wrapper, &*s);
+      AppMsg::Shutdown => {},
+      AppMsg::UpdateApps(s) => {
+        // println!("got UpdateApps: {s:#?}");
+        // update_list_view(&mut self.list_view_wrapper, &*s);
+      },
+      AppMsg::SetVisibility(b) => {
+        self.visible = b;
       },
     }
   }
@@ -287,33 +276,38 @@ impl SimpleComponent for AppLauncher {
     //   .label
     //   .set_label(&format!("Counter: {}", self.counter));
 
+    widgets.window.set_visible(self.visible);
+
     // TODO: draw paintable?
     // https://gtk-rs.org/gtk4-rs/git/docs/gtk4/struct.IconTheme.html
   }
 }
 
-static SHUTDOWN_TX: OnceLock<broadcast::Sender<()>> = OnceLock::new();
-
-fn shutdown() {
-  SHUTDOWN_TX.get().unwrap().send(()).unwrap();
+struct TestInterface {
+  msg_tx: broadcast::Sender<AppMsg>,
 }
-
-#[derive(Default)]
-struct TestInterface {}
 
 #[zbus::interface(name = "dev.peelz.pzs.Test")]
 impl TestInterface {
   fn shutdown(&mut self) -> zbus::fdo::Result<()> {
-    shutdown();
+    self.msg_tx.send(AppMsg::Shutdown).expect("TODO");
     Ok(())
   }
 
-  async fn play(&mut self) -> zbus::fdo::Result<()> {
+  async fn show(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .msg_tx
+      .send(AppMsg::SetVisibility(true))
+      .expect("TODO");
     Ok(())
   }
 }
 
-async fn setup_dbus() -> Result<(zbus::Connection, impl Future<Output = ()>)> {
+async fn setup_dbus(
+  dbus_init: DbusInit,
+) -> Result<(zbus::Connection, impl Future<Output = ()>)> {
+  let DbusInit { mut msg_rx, msg_tx } = dbus_init;
+
   const DBUS_SESSION_BUS_ADDRESS: &str = "DBUS_SESSION_BUS_ADDRESS";
   let dbus_address = std::env::var(DBUS_SESSION_BUS_ADDRESS).wrap_err(
     format!("{DBUS_SESSION_BUS_ADDRESS} is not set or is invalid"),
@@ -331,15 +325,15 @@ async fn setup_dbus() -> Result<(zbus::Connection, impl Future<Output = ()>)> {
     let object_server = connection.object_server();
 
     object_server
-      .at("/dev/peelz/pzs", TestInterface::default())
+      .at("/dev/peelz/pzs", TestInterface { msg_tx })
       .await
       .wrap_err("failed to register bus interface")
       .and_then(|x| {
-        if x {
-          Ok(())
-        } else {
+        if !x {
           eyre::bail!("dbus interface is already registered")
         }
+
+        Ok(())
       })?;
 
     connection
@@ -348,15 +342,16 @@ async fn setup_dbus() -> Result<(zbus::Connection, impl Future<Output = ()>)> {
       .wrap_err("failed to register name on bus")?;
   }
 
-  let f = {
-    let (tx, mut rx) = broadcast::channel::<()>(1);
-    SHUTDOWN_TX.set(tx).unwrap();
-    async move {
-      rx.recv().await.unwrap();
+  let connection_guard = async move {
+    loop {
+      match msg_rx.recv().await.expect("TODO") {
+        AppMsg::Shutdown => break,
+        _ => (),
+      };
     }
   };
 
-  Ok((connection, f))
+  Ok((connection, connection_guard))
 }
 
 fn run_gtk(app_init: AppLauncherInit) {
@@ -367,34 +362,40 @@ fn run_gtk(app_init: AppLauncherInit) {
   c.with_thread_default(|| {
     let _ = gio::glib::spawn_future_local({
       let ml = Rc::clone(&ml);
-      let mut rx = SHUTDOWN_TX.get().unwrap().subscribe();
+      let mut rx = app_init.msg_tx.subscribe();
       async move {
-        rx.recv().await.unwrap();
-        println!("bye");
-        ml.quit();
+        loop {
+          let msg = rx.recv().await.unwrap();
+          if let AppMsg::Shutdown = msg {
+            println!("bye");
+            ml.quit();
+          } else {
+            continue;
+          }
+        }
       }
     });
 
-    // let b = gio::glib::spawn_future_local({
-    //   async move {
-    //     tokio::time::sleep(Duration::from_secs(10)).await;
-    //     println!("signaling SHUTDOWN_TX");
-    //     SHUTDOWN_TX.get().unwrap().send(()).unwrap();
-    //   }
-    // });
-
     gtk4::init().expect("failed to initialize gtk");
 
-    let app = RelmApp::new("relm4.example.simple");
-    app.run::<AppLauncher>(app_init);
+    RelmApp::new("relm4.example.simple")
+      .visible_on_activate(false)
+      .run::<AppLauncher>(app_init);
 
-    ml.run();
+    // ml.run();
   })
   .unwrap();
 }
 
 pub(crate) async fn main() {
-  let (dbus_connection, dbus_shutdown) = match setup_dbus().await {
+  let (msg_tx, _) = broadcast::channel::<AppMsg>(10);
+
+  let (dbus_connection, dbus_shutdown) = match setup_dbus(DbusInit {
+    msg_tx: msg_tx.clone(),
+    msg_rx: msg_tx.subscribe(),
+  })
+  .await
+  {
     Err(err) => {
       error!({ %err }, "dbus setup failed");
       return;
@@ -402,71 +403,74 @@ pub(crate) async fn main() {
     Ok(f) => f,
   };
 
-  let (msg_tx, msg_rx) =
-    tokio::sync::mpsc::unbounded_channel::<AppLauncherMsg>();
-
   let apps = xdg::read_applications()
     .await
     .expect("failed to read applications");
-  let app_init = AppLauncherInit { msg_rx, apps };
+  let app_init = AppLauncherInit {
+    visible: false,
+    msg_tx: msg_tx.clone(),
+    msg_rx: msg_tx.subscribe(),
+    apps,
+  };
 
   let gtk = tokio::task::spawn_blocking(move || run_gtk(app_init));
 
-  let watcher = tokio::task::spawn(async move {
-    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut watcher = notify::INotifyWatcher::new(
-      move |event| {
-        let _ = notify_tx.send(event);
-      },
-      notify::Config::default(),
-    )
-    .unwrap();
-
-    for d in xdg::BASEDIRS.find_data_files("applications") {
-      watcher
-        .watch(&*d, notify::RecursiveMode::Recursive)
-        .unwrap();
-    }
-
-    let dirty = AtomicBool::new(false);
-    loop {
-      let handle_notify = {
-        |x: notify::Result<notify::Event>| match x {
-          Ok(ev) if ev.kind.is_access() => {},
-          Ok(_) => {
-            dirty.store(true, std::sync::atomic::Ordering::SeqCst);
-          },
-          Err(err) => {
-            tracing::warn!(
-              "an error occurred while watching applications dir: {err}"
-            );
-          },
-        }
-      };
-
-      tokio::select! {
-        x = notify_rx.recv() => {
-          let Some(r) = x else {
-            return;
-          };
-          handle_notify(r);
-          continue;
+  let watcher = tokio::task::spawn({
+    let msg_tx = msg_tx.clone();
+    async move {
+      let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
+      let mut watcher = notify::INotifyWatcher::new(
+        move |event| {
+          let _ = notify_tx.send(event);
         },
-        _ = tokio::time::sleep(Duration::from_secs(5)) => {
-          if !dirty.load(std::sync::atomic::Ordering::SeqCst) {
-            continue;
-          }
-          tracing::info!("timeout after dirty");
-        },
+        notify::Config::default(),
+      )
+      .unwrap();
+
+      for d in xdg::BASEDIRS.find_data_files("applications") {
+        watcher
+          .watch(&*d, notify::RecursiveMode::Recursive)
+          .unwrap();
       }
 
-      let apps = xdg::read_applications()
-        .await
-        .expect("failed to read applications");
-      msg_tx
-        .send(AppLauncherMsg::UpdateApps(apps))
-        .unwrap();
-      dirty.store(false, std::sync::atomic::Ordering::SeqCst);
+      let dirty = AtomicBool::new(false);
+      loop {
+        let handle_notify = {
+          |x: notify::Result<notify::Event>| match x {
+            Ok(ev) if ev.kind.is_access() => {},
+            Ok(_) => {
+              dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
+            Err(err) => {
+              tracing::warn!(
+                "an error occurred while watching applications dir: {err}"
+              );
+            },
+          }
+        };
+
+        tokio::select! {
+          x = notify_rx.recv() => {
+            let Some(r) = x else {
+              return;
+            };
+            handle_notify(r);
+            continue;
+          },
+          _ = tokio::time::sleep(Duration::from_secs(5)) => {
+            if !dirty.load(std::sync::atomic::Ordering::SeqCst) {
+              continue;
+            }
+            tracing::info!("timeout after dirty");
+          },
+        }
+
+        let apps = xdg::read_applications()
+          .await
+          .expect("failed to read applications");
+        msg_tx.send(AppMsg::UpdateApps(apps)).unwrap();
+        dirty.store(false, std::sync::atomic::Ordering::SeqCst);
+      }
     }
   });
 
@@ -482,6 +486,6 @@ pub(crate) async fn main() {
     },
   }
 
-  shutdown();
+  msg_tx.send(AppMsg::Shutdown).expect("TODO");
   drop(dbus_connection);
 }
