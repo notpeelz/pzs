@@ -206,6 +206,7 @@ impl SimpleComponent for AppLauncher {
               break;
             },
             Err(broadcast::error::RecvError::Lagged(_)) => {
+              // TODO: log lag?
               continue;
             },
           };
@@ -365,13 +366,17 @@ fn run_gtk(app_init: AppLauncherInit) {
       let mut rx = app_init.msg_tx.subscribe();
       async move {
         loop {
-          let msg = rx.recv().await.unwrap();
-          if let AppMsg::Shutdown = msg {
-            println!("bye");
-            ml.quit();
-          } else {
-            continue;
-          }
+          match rx.recv().await {
+            Ok(AppMsg::Shutdown) | Err(broadcast::error::RecvError::Closed) => {
+              println!("bye");
+              ml.quit();
+              break;
+            },
+            Ok(_) => {},
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+              // TODO: log lag?
+            },
+          };
         }
       }
     });
@@ -381,8 +386,6 @@ fn run_gtk(app_init: AppLauncherInit) {
     RelmApp::new("relm4.example.simple")
       .visible_on_activate(false)
       .run::<AppLauncher>(app_init);
-
-    // ml.run();
   })
   .unwrap();
 }
