@@ -33,6 +33,7 @@ struct AppLauncherInit {
 
 struct AppLauncher {
   visible: bool,
+  new_apps: Option<Vec<xdg::Application>>,
   list_view_wrapper: TypedListView<MyListItem, gtk4::SingleSelection>,
   handle: Option<glib::JoinHandle<()>>,
 }
@@ -42,6 +43,7 @@ enum AppMsg {
   Shutdown,
   UpdateApps(Vec<xdg::Application>),
   SetVisibility(bool),
+  ToggleVisibility,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,12 +52,6 @@ struct MyListItem {
   icon: String,
   name: String,
 }
-
-// TODO:
-// impl MyListItem {
-//   fn new(value: u8) -> Self {
-//   }
-// }
 
 struct MyListItemWidgets {
   image: gtk::Image,
@@ -131,6 +127,19 @@ struct AppLauncherWidgets {
   window: gtk4::Window,
 }
 
+impl AppLauncher {
+  fn set_visibility(&mut self, visible: bool) {
+    self.visible = visible;
+
+    if visible {
+      if let Some(new_apps) = self.new_apps.take() {
+        self.new_apps = None;
+        update_list_view(&mut self.list_view_wrapper, &new_apps);
+      }
+    }
+  }
+}
+
 fn update_list_view(
   list_view: &mut TypedListView<MyListItem, gtk::SingleSelection>,
   apps: &[xdg::Application],
@@ -174,7 +183,6 @@ impl SimpleComponent for AppLauncher {
       .build()
   }
 
-  // Initialize the component.
   fn init(
     init: Self::Init,
     window: Self::Root,
@@ -226,6 +234,7 @@ impl SimpleComponent for AppLauncher {
 
     let model = AppLauncher {
       visible: init.visible,
+      new_apps: None,
       list_view_wrapper,
       handle: Some(handle),
     };
@@ -242,8 +251,8 @@ impl SimpleComponent for AppLauncher {
 
   fn shutdown(
     &mut self,
-    widgets: &mut Self::Widgets,
-    output: relm4::Sender<Self::Output>,
+    _widgets: &mut Self::Widgets,
+    _output: relm4::Sender<Self::Output>,
   ) {
     self
       .handle
@@ -257,12 +266,14 @@ impl SimpleComponent for AppLauncher {
   fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
     match msg {
       AppMsg::Shutdown => {},
-      AppMsg::UpdateApps(s) => {
-        // println!("got UpdateApps: {s:#?}");
-        // update_list_view(&mut self.list_view_wrapper, &*s);
+      AppMsg::UpdateApps(new_apps) => {
+        self.new_apps = Some(new_apps);
       },
-      AppMsg::SetVisibility(b) => {
-        self.visible = b;
+      AppMsg::SetVisibility(visible) => {
+        self.set_visibility(visible);
+      },
+      AppMsg::ToggleVisibility => {
+        self.set_visibility(!self.visible);
       },
     }
   }
@@ -273,14 +284,7 @@ impl SimpleComponent for AppLauncher {
     widgets: &mut Self::Widgets,
     _sender: ComponentSender<Self>,
   ) {
-    // widgets
-    //   .label
-    //   .set_label(&format!("Counter: {}", self.counter));
-
     widgets.window.set_visible(self.visible);
-
-    // TODO: draw paintable?
-    // https://gtk-rs.org/gtk4-rs/git/docs/gtk4/struct.IconTheme.html
   }
 }
 
@@ -299,6 +303,22 @@ impl TestInterface {
     self
       .msg_tx
       .send(AppMsg::SetVisibility(true))
+      .expect("TODO");
+    Ok(())
+  }
+
+  async fn hide(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .msg_tx
+      .send(AppMsg::SetVisibility(false))
+      .expect("TODO");
+    Ok(())
+  }
+
+  async fn toggle(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .msg_tx
+      .send(AppMsg::ToggleVisibility)
       .expect("TODO");
     Ok(())
   }
@@ -383,9 +403,9 @@ fn run_gtk(app_init: AppLauncherInit) {
 
     gtk4::init().expect("failed to initialize gtk");
 
-    RelmApp::new("relm4.example.simple")
-      .visible_on_activate(false)
-      .run::<AppLauncher>(app_init);
+    let app = RelmApp::new("dev.peelz.pzs").visible_on_activate(false);
+    app.allow_multiple_instances(true);
+    app.run::<AppLauncher>(app_init);
   })
   .unwrap();
 }
