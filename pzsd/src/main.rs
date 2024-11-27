@@ -191,11 +191,26 @@ impl SimpleComponent for AppLauncher {
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_visible(init.visible);
+    window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
 
     let vbox = gtk::Box::builder()
       .orientation(gtk::Orientation::Vertical)
       .spacing(5)
       .build();
+
+    {
+      let sender = sender.clone();
+      let key_controller = gtk::EventControllerKey::new();
+      key_controller.connect_key_pressed(move |_, keyval, _, _| {
+        if keyval == gtk4::gdk::Key::Escape {
+          sender.input(AppMsg::SetVisibility(false));
+          glib::Propagation::Stop
+        } else {
+          glib::Propagation::Proceed
+        }
+      });
+      window.add_controller(key_controller);
+    }
 
     let sw = gtk::ScrolledWindow::builder()
       .vexpand(true)
@@ -205,6 +220,7 @@ impl SimpleComponent for AppLauncher {
     window.container_add(&vbox);
 
     let handle = {
+      let sender = sender.clone();
       let mut msg_rx = init.msg_rx;
       relm4::spawn_local(async move {
         loop {
