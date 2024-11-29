@@ -5,11 +5,12 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::xdg;
-use eyre::Context;
-use eyre::Result;
+use eyre::{Context, Result};
 use gio::glib;
-use gtk4::prelude::WidgetExt;
-use gtk4::IconPaintable;
+use gtk::gdk;
+use gtk::prelude::WidgetExt;
+use gtk::IconPaintable;
+use gtk4::prelude::EventControllerExt;
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
 use relm4::prelude::*;
@@ -34,7 +35,8 @@ struct AppLauncherInit {
 struct AppLauncher {
   visible: bool,
   new_apps: Option<Vec<xdg::Application>>,
-  list_view_wrapper: TypedListView<MyListItem, gtk4::SingleSelection>,
+  input_buffer: gtk::EntryBuffer,
+  list_view_wrapper: TypedListView<MyListItem, gtk::SingleSelection>,
   handle: Option<glib::JoinHandle<()>>,
 }
 
@@ -93,7 +95,7 @@ impl RelmListItem for MyListItem {
       IconPaintable::for_file(&gio::File::for_path(&self.icon), 48, 1)
     } else {
       let theme =
-        gtk4::IconTheme::for_display(&gtk4::gdk::Display::default().unwrap());
+        gtk::IconTheme::for_display(&gdk::Display::default().unwrap());
 
       if theme.has_icon(&self.icon) {
         theme.lookup_icon(
@@ -101,8 +103,8 @@ impl RelmListItem for MyListItem {
           &[],
           48,
           1,
-          gtk4::TextDirection::None,
-          gtk4::IconLookupFlags::empty(),
+          gtk::TextDirection::None,
+          gtk::IconLookupFlags::empty(),
         )
       } else {
         theme.lookup_icon(
@@ -110,8 +112,8 @@ impl RelmListItem for MyListItem {
           &[],
           48,
           1,
-          gtk4::TextDirection::None,
-          gtk4::IconLookupFlags::empty(),
+          gtk::TextDirection::None,
+          gtk::IconLookupFlags::empty(),
         )
       }
     };
@@ -124,7 +126,7 @@ impl RelmListItem for MyListItem {
 #[allow(dead_code)]
 struct AppLauncherWidgets {
   list_view: gtk::ListView,
-  window: gtk4::Window,
+  window: gtk::Window,
 }
 
 impl AppLauncher {
@@ -198,24 +200,36 @@ impl SimpleComponent for AppLauncher {
       .spacing(5)
       .build();
 
-    {
-      let sender = sender.clone();
+    let input_buffer = gtk::EntryBuffer::new(glib::GStr::NONE);
+    let input = gtk::Entry::builder()
+      .buffer(&input_buffer)
+      .margin_top(10)
+      .placeholder_text("Search")
+      .build();
+    let input_key_controller = gtk::EventControllerKey::new();
+    input.add_controller(input_key_controller.clone());
+
+    window.add_controller({
       let key_controller = gtk::EventControllerKey::new();
+      let sender = sender.clone();
       key_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gtk4::gdk::Key::Escape {
+        if keyval == gdk::Key::Escape {
           sender.input(AppMsg::SetVisibility(false));
-          glib::Propagation::Stop
-        } else {
-          glib::Propagation::Proceed
+          return glib::Propagation::Stop;
         }
+
+        glib::Propagation::Proceed
       });
-      window.add_controller(key_controller);
-    }
+      key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+      key_controller
+    });
 
     let sw = gtk::ScrolledWindow::builder()
       .vexpand(true)
+      .can_focus(false)
       .build();
 
+    vbox.container_add(&input);
     vbox.container_add(&sw);
     window.container_add(&vbox);
 
@@ -242,6 +256,8 @@ impl SimpleComponent for AppLauncher {
 
     let mut list_view_wrapper =
       TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
+    let list_view = list_view_wrapper.view.clone();
+    sw.container_add(&list_view);
 
     // list_view_wrapper.add_filter(|item| item.value % 2 == 0);
     // list_view_wrapper.set_filter_status(0, false);
@@ -251,11 +267,10 @@ impl SimpleComponent for AppLauncher {
     let model = AppLauncher {
       visible: init.visible,
       new_apps: None,
+      input_buffer,
       list_view_wrapper,
       handle: Some(handle),
     };
-    let list_view = &model.list_view_wrapper.view;
-    sw.container_add(&list_view);
 
     let widgets = AppLauncherWidgets {
       list_view: list_view.clone(),
@@ -417,7 +432,7 @@ fn run_gtk(app_init: AppLauncherInit) {
       }
     });
 
-    gtk4::init().expect("failed to initialize gtk");
+    gtk::init().expect("failed to initialize gtk");
 
     let app = RelmApp::new("dev.peelz.pzs").visible_on_activate(false);
     app.allow_multiple_instances(true);
