@@ -444,7 +444,7 @@ struct TestInterface {
   msg_tx: broadcast::Sender<AppMsg>,
 }
 
-#[zbus::interface(name = "dev.peelz.pzs.Test")]
+#[zbus::interface(name = "dev.peelz.pzs.AppLauncher")]
 impl TestInterface {
   fn shutdown(&mut self) -> zbus::fdo::Result<()> {
     self.msg_tx.send(AppMsg::Shutdown).expect("TODO");
