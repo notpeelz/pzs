@@ -203,8 +203,7 @@ fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
         dup2(dev_null_fd, nix::libc::STDIN_FILENO);
       }
       let _ = nix::unistd::setsid();
-      let _ =
-        nix::unistd::execv(c"/usr/bin/uwsm", &[c"uwsm", c"app", c"--", &id]);
+      let _ = nix::unistd::execvp(c"uwsm", &[c"uwsm", c"app", c"--", &id]);
       std::process::abort();
     },
     Ok(_) => {},
