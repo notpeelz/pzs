@@ -7,10 +7,12 @@ use std::time::Duration;
 use crate::xdg;
 use eyre::{Context, Result};
 use gio::glib;
+use gio::prelude::ListModelExt;
 use gtk::gdk;
+use gtk::prelude::EditableExt;
+use gtk::prelude::EventControllerExt;
 use gtk::prelude::WidgetExt;
 use gtk::IconPaintable;
-use gtk4::prelude::EventControllerExt;
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
 use relm4::prelude::*;
@@ -35,7 +37,6 @@ struct AppLauncherInit {
 struct AppLauncher {
   visible: bool,
   new_apps: Option<Vec<xdg::Application>>,
-  input_buffer: gtk::EntryBuffer,
   list_view_wrapper: TypedListView<MyListItem, gtk::SingleSelection>,
   handle: Option<glib::JoinHandle<()>>,
 }
@@ -44,8 +45,10 @@ struct AppLauncher {
 enum AppMsg {
   Shutdown,
   UpdateApps(Vec<xdg::Application>),
+  UpdateFilter(String),
   SetVisibility(bool),
   ToggleVisibility,
+  Run,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -125,7 +128,6 @@ impl RelmListItem for MyListItem {
 
 #[allow(dead_code)]
 struct AppLauncherWidgets {
-  list_view: gtk::ListView,
   window: gtk::Window,
 }
 
@@ -200,29 +202,10 @@ impl SimpleComponent for AppLauncher {
       .spacing(5)
       .build();
 
-    let input_buffer = gtk::EntryBuffer::new(glib::GStr::NONE);
-    let input = gtk::Entry::builder()
-      .buffer(&input_buffer)
+    let input = gtk::SearchEntry::builder()
       .margin_top(10)
       .placeholder_text("Search")
       .build();
-    let input_key_controller = gtk::EventControllerKey::new();
-    input.add_controller(input_key_controller.clone());
-
-    window.add_controller({
-      let key_controller = gtk::EventControllerKey::new();
-      let sender = sender.clone();
-      key_controller.connect_key_pressed(move |_, keyval, _, _| {
-        if keyval == gdk::Key::Escape {
-          sender.input(AppMsg::SetVisibility(false));
-          return glib::Propagation::Stop;
-        }
-
-        glib::Propagation::Proceed
-      });
-      key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-      key_controller
-    });
 
     let sw = gtk::ScrolledWindow::builder()
       .vexpand(true)
@@ -257,25 +240,76 @@ impl SimpleComponent for AppLauncher {
     let mut list_view_wrapper =
       TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
     let list_view = list_view_wrapper.view.clone();
+    let list_view_selection = list_view_wrapper.selection_model.clone();
     sw.container_add(&list_view);
 
-    // list_view_wrapper.add_filter(|item| item.value % 2 == 0);
-    // list_view_wrapper.set_filter_status(0, false);
-
     update_list_view(&mut list_view_wrapper, &init.apps);
+    {
+      let sender = sender.clone();
+      input.connect_search_changed(move |input| {
+        let text = input.text().to_string();
+        sender.input(AppMsg::UpdateFilter(text));
+      });
+    }
+
+    window.add_controller({
+      let key_controller = gtk::EventControllerKey::new();
+      let sender = sender.clone();
+
+      let list_view_selection = list_view_selection.clone();
+      let move_selection = move |delta: i32| {
+        let n_items = list_view_selection.model().unwrap().n_items();
+        let Ok(index_last) = (n_items - 1).try_into() else {
+          return;
+        };
+
+        let index = list_view_selection.selected() as isize + delta as isize;
+        let index = index.clamp(0, index_last) as u32;
+        list_view_selection.set_selected(index);
+        list_view.scroll_to(index, gtk::ListScrollFlags::FOCUS, None);
+      };
+
+      key_controller.connect_key_pressed(move |_, keyval, _, state| {
+        match keyval {
+          gdk::Key::Escape => {
+            sender.input(AppMsg::SetVisibility(false));
+          },
+          gdk::Key::Up => move_selection(-1),
+          gdk::Key::Down => move_selection(1),
+          // TODO: don't hardcode delta
+          gdk::Key::Page_Up => move_selection(-6),
+          gdk::Key::Page_Down => move_selection(6),
+          gdk::Key::Home => move_selection(-i32::MAX),
+          gdk::Key::End => move_selection(i32::MAX),
+          gdk::Key::Tab | gdk::Key::ISO_Left_Tab => {
+            if state.contains(gdk::ModifierType::SHIFT_MASK) {
+              move_selection(-1);
+            } else {
+              move_selection(1);
+            }
+          },
+          gdk::Key::Return => {
+            sender.input(AppMsg::Run);
+          },
+          _ => {
+            return glib::Propagation::Proceed;
+          },
+        }
+
+        glib::Propagation::Stop
+      });
+      key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+      key_controller
+    });
 
     let model = AppLauncher {
       visible: init.visible,
       new_apps: None,
-      input_buffer,
       list_view_wrapper,
       handle: Some(handle),
     };
 
-    let widgets = AppLauncherWidgets {
-      list_view: list_view.clone(),
-      window,
-    };
+    let widgets = AppLauncherWidgets { window };
 
     ComponentParts { model, widgets }
   }
@@ -300,11 +334,37 @@ impl SimpleComponent for AppLauncher {
       AppMsg::UpdateApps(new_apps) => {
         self.new_apps = Some(new_apps);
       },
+      AppMsg::UpdateFilter(text) => {
+        let text = text.trim().to_lowercase();
+        self.list_view_wrapper.clear_filters();
+        self
+          .list_view_wrapper
+          .add_filter(move |item| item.name.to_lowercase().contains(&text));
+        self
+          .list_view_wrapper
+          .selection_model
+          .set_selected(0);
+        self.list_view_wrapper.view.scroll_to(
+          0,
+          gtk::ListScrollFlags::FOCUS,
+          None,
+        );
+      },
       AppMsg::SetVisibility(visible) => {
         self.set_visibility(visible);
       },
       AppMsg::ToggleVisibility => {
         self.set_visibility(!self.visible);
+      },
+      AppMsg::Run => {
+        self.set_visibility(false);
+        if let Some(item) = self
+          .list_view_wrapper
+          .get_visible(self.list_view_wrapper.selection_model.selected())
+        {
+          let item = item.borrow();
+          println!("{}.desktop", item.id);
+        }
       },
     }
   }
