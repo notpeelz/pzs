@@ -60,6 +60,7 @@ struct MyListItem {
   id: String,
   icon: String,
   name: String,
+  keywords: Vec<String>,
 }
 
 struct MyListItemWidgets {
@@ -166,11 +167,13 @@ fn update_list_view(
     let Some(ref name) = desktop_file.name else {
       continue;
     };
+    let keywords = desktop_file.keywords.clone().unwrap_or_default();
 
     list_view.append(MyListItem {
       id: app.id.clone(),
       icon: icon.clone(),
       name: name.clone(),
+      keywords,
     });
   }
 }
@@ -381,9 +384,19 @@ impl SimpleComponent for AppLauncher {
       AppMsg::UpdateFilter(text) => {
         let text = text.trim().to_lowercase();
         self.list_view_wrapper.clear_filters();
-        self
-          .list_view_wrapper
-          .add_filter(move |item| item.name.to_lowercase().contains(&text));
+        self.list_view_wrapper.add_filter(move |item| {
+          if item.name.to_lowercase().contains(&text) {
+            return true;
+          }
+
+          for k in &item.keywords {
+            if k.to_lowercase().contains(&text) {
+              return true;
+            }
+          }
+
+          false
+        });
         if self.list_view_wrapper.selection_model.n_items() > 0 {
           self
             .list_view_wrapper

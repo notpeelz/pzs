@@ -24,6 +24,7 @@ pub struct DesktopFile {
   pub no_display: Option<bool>,
   pub icon: Option<String>,
   pub name: Option<String>,
+  pub keywords: Option<Vec<String>>,
 }
 
 impl DesktopFile {
@@ -62,11 +63,17 @@ impl DesktopFile {
 
     let icon = entry.get("Icon").map(|x| x.to_owned());
     let name = entry.get("Name").map(|x| x.to_owned());
+    let keywords = entry.get("Keywords").map(|x| {
+      x.split(";")
+        .map(|k| k.to_owned())
+        .collect::<Vec<_>>()
+    });
 
     Ok(DesktopFile {
       no_display,
       icon,
       name,
+      keywords,
     })
   }
 }
