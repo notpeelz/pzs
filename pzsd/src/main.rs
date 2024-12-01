@@ -1,10 +1,12 @@
 use std::future::Future;
+use std::os::fd::AsRawFd;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use crate::xdg;
+use eyre::bail;
 use eyre::{Context, Result};
 use gio::glib;
 use gio::prelude::ListModelExt;
@@ -14,13 +16,15 @@ use gtk::prelude::EventControllerExt;
 use gtk::prelude::WidgetExt;
 use gtk::IconPaintable;
 use gtk4_layer_shell::{Layer, LayerShell};
+use nix::libc::dup2;
 use notify::Watcher;
 use relm4::prelude::*;
 use relm4::typed_view::list::RelmListItem;
 use relm4::typed_view::list::TypedListView;
 use relm4::RelmContainerExt;
 use tokio::sync::broadcast;
-use tracing::error;
+use tracing::warn;
+use tracing::{error, info};
 
 struct DbusInit {
   msg_tx: broadcast::Sender<AppMsg>,
@@ -171,6 +175,44 @@ fn update_list_view(
   }
 }
 
+fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
+  use once_cell::sync::Lazy;
+  static DEV_NULL: Lazy<std::fs::File> = Lazy::<std::fs::File>::new(|| {
+    std::fs::File::options()
+      .read(true)
+      .write(true)
+      .open("/dev/null")
+      .expect("failed to open /dev/null")
+  });
+
+  let id = id.as_ref();
+  info!("launching app \"{}\"", id);
+
+  let id = format!("{id}.desktop");
+  let id = std::ffi::CString::new(id)?;
+
+  match unsafe { nix::unistd::fork() } {
+    Ok(nix::unistd::ForkResult::Child) => {
+      let dev_null_fd = DEV_NULL.as_raw_fd();
+      unsafe {
+        dup2(dev_null_fd, nix::libc::STDOUT_FILENO);
+        dup2(dev_null_fd, nix::libc::STDERR_FILENO);
+        dup2(dev_null_fd, nix::libc::STDIN_FILENO);
+      }
+      let _ = nix::unistd::setsid();
+      let _ =
+        nix::unistd::execv(c"/usr/bin/uwsm", &[c"uwsm", c"app", c"--", &id]);
+      std::process::abort();
+    },
+    Ok(_) => {},
+    Err(err) => {
+      bail!("fork failed: {}", err.desc());
+    },
+  }
+
+  Ok(())
+}
+
 impl SimpleComponent for AppLauncher {
   type Init = AppLauncherInit;
   type Input = AppMsg;
@@ -259,14 +301,16 @@ impl SimpleComponent for AppLauncher {
       let list_view_selection = list_view_selection.clone();
       let move_selection = move |delta: i32| {
         let n_items = list_view_selection.model().unwrap().n_items();
-        let Ok(index_last) = (n_items - 1).try_into() else {
+        let Ok(index_last) = TryInto::<isize>::try_into(n_items - 1) else {
           return;
         };
 
         let index = list_view_selection.selected() as isize + delta as isize;
         let index = index.clamp(0, index_last) as u32;
-        list_view_selection.set_selected(index);
-        list_view.scroll_to(index, gtk::ListScrollFlags::FOCUS, None);
+        if list_view_selection.n_items() > 0 {
+          list_view_selection.set_selected(index);
+          list_view.scroll_to(index, gtk::ListScrollFlags::FOCUS, None);
+        }
       };
 
       key_controller.connect_key_pressed(move |_, keyval, _, state| {
@@ -340,15 +384,17 @@ impl SimpleComponent for AppLauncher {
         self
           .list_view_wrapper
           .add_filter(move |item| item.name.to_lowercase().contains(&text));
-        self
-          .list_view_wrapper
-          .selection_model
-          .set_selected(0);
-        self.list_view_wrapper.view.scroll_to(
-          0,
-          gtk::ListScrollFlags::FOCUS,
-          None,
-        );
+        if self.list_view_wrapper.selection_model.n_items() > 0 {
+          self
+            .list_view_wrapper
+            .selection_model
+            .set_selected(0);
+          self.list_view_wrapper.view.scroll_to(
+            0,
+            gtk::ListScrollFlags::FOCUS,
+            None,
+          );
+        }
       },
       AppMsg::SetVisibility(visible) => {
         self.set_visibility(visible);
@@ -363,7 +409,9 @@ impl SimpleComponent for AppLauncher {
           .get_visible(self.list_view_wrapper.selection_model.selected())
         {
           let item = item.borrow();
-          println!("{}.desktop", item.id);
+          if let Err(err) = launch_app(&item.id) {
+            warn!("failed to launch {}: {}", item.id, err);
+          }
         }
       },
     }
