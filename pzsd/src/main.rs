@@ -42,6 +42,7 @@ struct AppLauncher {
   visible: bool,
   new_apps: Option<Vec<xdg::Application>>,
   list_view_wrapper: TypedListView<MyListItem, gtk::SingleSelection>,
+  input: gtk::SearchEntry,
   handle: Option<glib::JoinHandle<()>>,
 }
 
@@ -352,6 +353,7 @@ impl SimpleComponent for AppLauncher {
       visible: init.visible,
       new_apps: None,
       list_view_wrapper,
+      input,
       handle: Some(handle),
     };
 
@@ -409,9 +411,11 @@ impl SimpleComponent for AppLauncher {
         }
       },
       AppMsg::SetVisibility(visible) => {
+        self.input.set_text("");
         self.set_visibility(visible);
       },
       AppMsg::ToggleVisibility => {
+        self.input.set_text("");
         self.set_visibility(!self.visible);
       },
       AppMsg::Run => {
