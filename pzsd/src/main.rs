@@ -197,17 +197,28 @@ fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
 
   match unsafe { nix::unistd::fork() } {
     Ok(nix::unistd::ForkResult::Child) => {
-      let dev_null_fd = DEV_NULL.as_raw_fd();
-      unsafe {
-        dup2(dev_null_fd, nix::libc::STDOUT_FILENO);
-        dup2(dev_null_fd, nix::libc::STDERR_FILENO);
-        dup2(dev_null_fd, nix::libc::STDIN_FILENO);
-      }
       let _ = nix::unistd::setsid();
-      let _ = nix::unistd::execvp(c"uwsm", &[c"uwsm", c"app", c"--", &id]);
-      std::process::abort();
+
+      match unsafe { nix::unistd::fork() } {
+        Ok(nix::unistd::ForkResult::Child) => {
+          let dev_null_fd = DEV_NULL.as_raw_fd();
+          unsafe {
+            dup2(dev_null_fd, nix::libc::STDOUT_FILENO);
+            dup2(dev_null_fd, nix::libc::STDERR_FILENO);
+            dup2(dev_null_fd, nix::libc::STDIN_FILENO);
+          }
+          let _ = nix::unistd::execvp(c"uwsm", &[c"uwsm", c"app", c"--", &id]);
+          std::process::abort();
+        },
+        Ok(nix::unistd::ForkResult::Parent { .. }) => {},
+        Err(_) => {},
+      }
+
+      std::process::exit(0);
     },
-    Ok(_) => {},
+    Ok(nix::unistd::ForkResult::Parent { child }) => {
+      nix::sys::wait::waitpid(child, None).wrap_err("waitpid failed")?;
+    },
     Err(err) => {
       bail!("fork failed: {}", err.desc());
     },
