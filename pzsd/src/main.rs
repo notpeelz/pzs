@@ -1,3 +1,4 @@
+use std::cell::Ref;
 use std::future::Future;
 use std::os::fd::AsRawFd;
 use std::rc::Rc;
@@ -9,7 +10,7 @@ use crate::xdg;
 use eyre::bail;
 use eyre::{Context, Result};
 use gio::glib;
-use gio::prelude::ListModelExt;
+use gio::prelude::*;
 use gtk::gdk;
 use gtk::prelude::EditableExt;
 use gtk::prelude::EventControllerExt;
@@ -56,7 +57,7 @@ enum AppMsg {
   Run,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq)]
 struct MyListItem {
   id: String,
   icon: String,
@@ -310,8 +311,47 @@ impl SimpleComponent for AppLauncher {
       })
     };
 
+    // TODO: don't use TypedListView. The abstraction is too limited.
     let mut list_view_wrapper =
-      TypedListView::<MyListItem, gtk::SingleSelection>::with_sorting();
+      TypedListView::<MyListItem, gtk::SingleSelection>::new();
+
+    let model = {
+      fn get_value<T: 'static>(obj: &glib::Object) -> Ref<'_, T> {
+        let wrapper = obj
+          .downcast_ref::<glib::BoxedAnyObject>()
+          .unwrap();
+        wrapper.borrow()
+      }
+
+      let sort_fn =
+        Box::new(|l: &Ref<'_, MyListItem>, r: &Ref<'_, MyListItem>| {
+          if l.id == "steam" {
+            std::cmp::Ordering::Less
+          } else {
+            std::cmp::Ordering::Greater
+          }
+        });
+
+      let sorter = gtk::CustomSorter::new(move |first, second| {
+        let first = get_value::<MyListItem>(first);
+        let second = get_value::<MyListItem>(second);
+        match sort_fn(&first, &second) {
+          std::cmp::Ordering::Less => gtk::Ordering::Smaller,
+          std::cmp::Ordering::Equal => gtk::Ordering::Equal,
+          std::cmp::Ordering::Greater => gtk::Ordering::Larger,
+        }
+      });
+
+      let model = list_view_wrapper.view.model().unwrap();
+      println!("model: {model:#?}");
+
+      let model = gtk::SortListModel::new(Some(model), Some(sorter))
+        .upcast::<gio::ListModel>();
+
+      gtk::SingleSelection::new(Some(model))
+    };
+
+    list_view_wrapper.view.set_model(Some(&model));
     let list_view = list_view_wrapper.view.clone();
     let list_view_selection = list_view_wrapper.selection_model.clone();
     sw.container_add(&list_view);
@@ -413,6 +453,7 @@ impl SimpleComponent for AppLauncher {
       AppMsg::UpdateFilter(text) => {
         let text = text.trim().to_lowercase();
         self.list_view_wrapper.clear_filters();
+        // TODO: sort by name, then keyword (e.g. searching for "steam" should show Steam before steam-related tools)
         self.list_view_wrapper.add_filter(move |item| {
           if item.name.to_lowercase().contains(&text) {
             return true;
