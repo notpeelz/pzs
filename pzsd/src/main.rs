@@ -480,13 +480,11 @@ impl SimpleComponent for AppLauncher {
         self.select(0);
       },
       AppMsg::Run => {
+        let selected = self.list_view_wrapper.selection_model.selected();
         self.set_visibility(false);
         self.select(0);
 
-        if let Some(item) = self
-          .list_view_wrapper
-          .get_visible(self.list_view_wrapper.selection_model.selected())
-        {
+        if let Some(item) = self.list_view_wrapper.get_visible(selected) {
           let item = item.borrow();
           if let Err(err) = launch_app(&item.id) {
             warn!("failed to launch {}: {}", item.id, err);
