@@ -148,6 +148,23 @@ impl AppLauncher {
       }
     }
   }
+
+  fn select(&self, position: u32) {
+    if position > self.list_view_wrapper.selection_model.n_items() {
+      return;
+    }
+
+    self
+      .list_view_wrapper
+      .selection_model
+      .set_selected(position);
+
+    self.list_view_wrapper.view.scroll_to(
+      position,
+      gtk::ListScrollFlags::FOCUS,
+      None,
+    );
+  }
 }
 
 fn update_list_view(
@@ -409,28 +426,22 @@ impl SimpleComponent for AppLauncher {
 
           false
         });
-        if self.list_view_wrapper.selection_model.n_items() > 0 {
-          self
-            .list_view_wrapper
-            .selection_model
-            .set_selected(0);
-          self.list_view_wrapper.view.scroll_to(
-            0,
-            gtk::ListScrollFlags::FOCUS,
-            None,
-          );
-        }
+        self.select(0);
       },
       AppMsg::SetVisibility(visible) => {
         self.input.set_text("");
         self.set_visibility(visible);
+        self.select(0);
       },
       AppMsg::ToggleVisibility => {
         self.input.set_text("");
         self.set_visibility(!self.visible);
+        self.select(0);
       },
       AppMsg::Run => {
         self.set_visibility(false);
+        self.select(0);
+
         if let Some(item) = self
           .list_view_wrapper
           .get_visible(self.list_view_wrapper.selection_model.selected())
