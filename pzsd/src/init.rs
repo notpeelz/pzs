@@ -2,6 +2,7 @@
 
 use tracing::error;
 
+mod list;
 mod main;
 mod xdg;
 
