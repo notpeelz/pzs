@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::os::fd::AsRawFd;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
@@ -18,7 +17,6 @@ use gtk::prelude::WidgetExt;
 use gtk::IconPaintable;
 use gtk4 as gtk;
 use gtk4_layer_shell::{Layer, LayerShell};
-use nix::libc::dup2;
 use notify::Watcher;
 use relm4::prelude::*;
 use relm4::RelmContainerExt;
@@ -198,15 +196,6 @@ fn update_list_view(
 }
 
 fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
-  use once_cell::sync::Lazy;
-  static DEV_NULL: Lazy<std::fs::File> = Lazy::<std::fs::File>::new(|| {
-    std::fs::File::options()
-      .read(true)
-      .write(true)
-      .open("/dev/null")
-      .expect("failed to open /dev/null")
-  });
-
   let id = id.as_ref();
   info!("launching app \"{}\"", id);
 
@@ -218,24 +207,32 @@ fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
       let _ = nix::unistd::setsid();
 
       match unsafe { nix::unistd::fork() } {
-        Ok(nix::unistd::ForkResult::Child) => {
-          let dev_null_fd = DEV_NULL.as_raw_fd();
-          unsafe {
-            dup2(dev_null_fd, nix::libc::STDOUT_FILENO);
-            dup2(dev_null_fd, nix::libc::STDERR_FILENO);
-            dup2(dev_null_fd, nix::libc::STDIN_FILENO);
+        Ok(nix::unistd::ForkResult::Child) => unsafe {
+          let fd = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+          if fd < 0 {
+            libc::_exit(0);
           }
+
+          if libc::dup2(fd, libc::STDOUT_FILENO) < 0
+            || libc::dup2(fd, libc::STDERR_FILENO) < 0
+            || libc::dup2(fd, libc::STDIN_FILENO) < 0
+          {
+            libc::_exit(0);
+          }
+
+          libc::close(fd);
           let _ = nix::unistd::execvp(c"uwsm", &[c"uwsm", c"app", c"--", &id]);
-          std::process::abort();
+
+          libc::_exit(0);
         },
         Ok(nix::unistd::ForkResult::Parent { .. }) => {},
         Err(_) => {},
       }
 
-      std::process::exit(0);
+      unsafe { libc::_exit(0) };
     },
     Ok(nix::unistd::ForkResult::Parent { child }) => {
-      nix::sys::wait::waitpid(child, None).wrap_err("waitpid failed")?;
+      nix::sys::wait::waitpid(child, None).unwrap();
     },
     Err(err) => {
       bail!("fork failed: {}", err.desc());
@@ -278,6 +275,7 @@ impl SimpleComponent for AppLauncher {
 
     let input = gtk::SearchEntry::builder()
       .margin_top(10)
+      .search_delay(0)
       .placeholder_text("Search")
       .build();
 
@@ -481,12 +479,15 @@ impl SimpleComponent for AppLauncher {
   }
 }
 
-struct TestInterface {
+// TODO: struct ShellInterface {}
+
+struct AppLauncherInterface {
   msg_tx: broadcast::Sender<AppMsg>,
 }
 
 #[zbus::interface(name = "dev.peelz.pzs.AppLauncher")]
-impl TestInterface {
+impl AppLauncherInterface {
+  // TODO: move this to a different interface
   fn shutdown(&mut self) -> zbus::fdo::Result<()> {
     self.msg_tx.send(AppMsg::Shutdown).expect("TODO");
     Ok(())
@@ -539,7 +540,7 @@ async fn setup_dbus(
     let object_server = connection.object_server();
 
     object_server
-      .at("/dev/peelz/pzs", TestInterface { msg_tx })
+      .at("/dev/peelz/pzs", AppLauncherInterface { msg_tx })
       .await
       .wrap_err("failed to register bus interface")
       .and_then(|x| {
