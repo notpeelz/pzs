@@ -278,9 +278,6 @@ where
     });
 
     self.update_model();
-    self
-      .selection_model
-      .set_list_model(&self.active_model);
   }
 
   /// Returns the amount of filters that were added.
@@ -447,6 +444,7 @@ where
     });
 
     self.sorter = Some(sorter);
+    self.update_model();
   }
 
   fn update_model(&mut self) {

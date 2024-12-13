@@ -69,7 +69,7 @@ struct MyListItemWidgets {
 
 impl Drop for MyListItemWidgets {
   fn drop(&mut self) {
-    dbg!(self.label.label());
+    // dbg!(self.label.label());
   }
 }
 
@@ -148,8 +148,7 @@ impl AppLauncher {
   }
 
   fn select(&self, position: u32) {
-    // FIXME: gtk_list_view_scroll_to: assertion 'pos < gtk_list_base_get_n_items (GTK_LIST_BASE (self))' failed
-    if position > self.list_view_wrapper.selection_model.n_items() {
+    if position >= self.list_view_wrapper.selection_model.n_items() {
       return;
     }
 
@@ -316,6 +315,12 @@ impl SimpleComponent for AppLauncher {
     let list_view_selection = list_view_wrapper.selection_model.clone();
     sw.container_add(&list_view);
 
+    list_view_wrapper.set_sorter(|first, second| {
+      let first_id = first.id.to_lowercase();
+      let second_id = second.id.to_lowercase();
+      first_id.cmp(&second_id)
+    });
+
     update_list_view(&mut list_view_wrapper, &init.apps);
     {
       let sender = sender.clone();
@@ -330,30 +335,57 @@ impl SimpleComponent for AppLauncher {
       let sender = sender.clone();
 
       let list_view_selection = list_view_selection.clone();
-      let move_selection = move |delta: i32| {
-        let n_items = list_view_selection.model().unwrap().n_items();
-        let Ok(index_last) = TryInto::<isize>::try_into(n_items - 1) else {
-          return;
-        };
 
-        let index = list_view_selection.selected() as isize + delta as isize;
-        let index = index.clamp(0, index_last) as u32;
-        if list_view_selection.n_items() > 0 {
-          list_view_selection.set_selected(index);
-          list_view.scroll_to(index, gtk::ListScrollFlags::FOCUS, None);
+      let move_selection = {
+        let list_view = list_view.clone();
+        move |delta: i32| {
+          let n_items = list_view_selection.model().unwrap().n_items();
+          let Ok(index_last) = TryInto::<isize>::try_into(n_items - 1) else {
+            return;
+          };
+
+          let index = list_view_selection.selected() as isize + delta as isize;
+          let index = index.clamp(0, index_last) as u32;
+          if list_view_selection.n_items() > 0 {
+            list_view_selection.set_selected(index);
+            list_view.scroll_to(index, gtk::ListScrollFlags::FOCUS, None);
+          }
         }
       };
 
       key_controller.connect_key_pressed(move |_, keyval, _, state| {
+        let get_visible_items = || {
+          let viewport_height = list_view.height();
+
+          let item_height = if let Some(first_row) = list_view.first_child() {
+            first_row.height()
+          } else {
+            return None;
+          };
+
+          if item_height > 0 {
+            Some((viewport_height / item_height).max(1) + 1)
+          } else {
+            None
+          }
+        };
+
         match keyval {
           gdk::Key::Escape => {
             sender.input(AppMsg::SetVisibility(false));
           },
           gdk::Key::Up => move_selection(-1),
           gdk::Key::Down => move_selection(1),
-          // TODO: don't hardcode delta
-          gdk::Key::Page_Up => move_selection(-6),
-          gdk::Key::Page_Down => move_selection(6),
+          gdk::Key::Page_Up => {
+            if let Some(visible_items) = get_visible_items() {
+              move_selection(-visible_items);
+            }
+          },
+          gdk::Key::Page_Down => {
+            if let Some(visible_items) = get_visible_items() {
+              move_selection(visible_items);
+            }
+          },
           gdk::Key::Home => move_selection(-i32::MAX),
           gdk::Key::End => move_selection(i32::MAX),
           gdk::Key::Tab | gdk::Key::ISO_Left_Tab => {
@@ -413,22 +445,24 @@ impl SimpleComponent for AppLauncher {
       AppMsg::UpdateFilter(text) => {
         let text = text.trim().to_lowercase();
 
-        self
-          .list_view_wrapper
-          .set_sorter(|first, second| {
-            if first.id == second.id {
-              std::cmp::Ordering::Equal
-            } else if first.id == "steam" {
-              std::cmp::Ordering::Less
-            } else if second.id == "steam" {
-              std::cmp::Ordering::Greater
-            } else {
-              first.id.cmp(&second.id)
+        self.list_view_wrapper.set_sorter({
+          let text = text.to_lowercase();
+          move |first, second| {
+            let first_id = first.id.to_lowercase();
+            let second_id = second.id.to_lowercase();
+
+            let first_starts_with = first_id.starts_with(&text);
+            let second_starts_with = second_id.starts_with(&text);
+
+            match (first_starts_with, second_starts_with) {
+              (true, false) => std::cmp::Ordering::Less,
+              (false, true) => std::cmp::Ordering::Greater,
+              _ => first_id.cmp(&second_id),
             }
-          });
+          }
+        });
 
         self.list_view_wrapper.clear_filters();
-        // TODO: sort by name, then keyword (e.g. searching for "steam" should show Steam before steam-related tools)
         self.list_view_wrapper.add_filter(move |item| {
           if item.name.to_lowercase().contains(&text) {
             return true;
@@ -442,6 +476,7 @@ impl SimpleComponent for AppLauncher {
 
           false
         });
+
         self.select(0);
       },
       AppMsg::SetVisibility(visible) => {
