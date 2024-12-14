@@ -316,9 +316,9 @@ impl SimpleComponent for AppLauncher {
     sw.container_add(&list_view);
 
     list_view_wrapper.set_sorter(|first, second| {
-      let first_id = first.id.to_lowercase();
-      let second_id = second.id.to_lowercase();
-      first_id.cmp(&second_id)
+      let first_name = first.name.to_lowercase();
+      let second_name = second.name.to_lowercase();
+      first_name.cmp(&second_name)
     });
 
     update_list_view(&mut list_view_wrapper, &init.apps);
@@ -448,16 +448,16 @@ impl SimpleComponent for AppLauncher {
         self.list_view_wrapper.set_sorter({
           let text = text.to_lowercase();
           move |first, second| {
-            let first_id = first.id.to_lowercase();
-            let second_id = second.id.to_lowercase();
+            let first_name = first.name.to_lowercase();
+            let second_name = second.name.to_lowercase();
 
-            let first_starts_with = first_id.starts_with(&text);
-            let second_starts_with = second_id.starts_with(&text);
+            let first_starts_with = first_name.starts_with(&text);
+            let second_starts_with = second_name.starts_with(&text);
 
             match (first_starts_with, second_starts_with) {
               (true, false) => std::cmp::Ordering::Less,
               (false, true) => std::cmp::Ordering::Greater,
-              _ => first_id.cmp(&second_id),
+              _ => first_name.cmp(&second_name),
             }
           }
         });
