@@ -25,6 +25,7 @@ pub struct DesktopFile {
   pub icon: Option<String>,
   pub name: Option<String>,
   pub keywords: Option<Vec<String>>,
+  pub only_show_in: Option<Vec<String>>,
 }
 
 impl DesktopFile {
@@ -68,12 +69,18 @@ impl DesktopFile {
         .map(|k| k.to_owned())
         .collect::<Vec<_>>()
     });
+    let only_show_in = entry.get("OnlyShowIn").map(|x| {
+      x.split(";")
+        .map(|k| k.to_owned())
+        .collect::<Vec<_>>()
+    });
 
     Ok(DesktopFile {
       no_display,
       icon,
       name,
       keywords,
+      only_show_in,
     })
   }
 }

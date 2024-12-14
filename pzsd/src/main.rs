@@ -4,8 +4,8 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use crate::list::{RelmListItem, RelmSelectionExt, TypedListView};
-use crate::xdg;
+use crate::list::{RelmListItem, TypedListView};
+use crate::{xdg, XDG_CURRENT_DESKTOP};
 use eyre::bail;
 use eyre::{Context, Result};
 use gio::glib;
@@ -39,7 +39,7 @@ struct AppLauncherInit {
 struct AppLauncher {
   visible: bool,
   new_apps: Option<Vec<xdg::Application>>,
-  list_view_wrapper: TypedListView<MyListItem, gtk::SingleSelection>,
+  list_view_wrapper: TypedListView<AppItem, gtk::SingleSelection>,
   input: gtk::SearchEntry,
   handle: Option<glib::JoinHandle<()>>,
 }
@@ -55,7 +55,7 @@ enum AppMsg {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct MyListItem {
+struct AppItem {
   id: String,
   icon: String,
   name: String,
@@ -73,7 +73,7 @@ impl Drop for MyListItemWidgets {
   }
 }
 
-impl RelmListItem for MyListItem {
+impl RelmListItem for AppItem {
   type Root = gtk::Box;
   type Widgets = MyListItemWidgets;
 
@@ -166,15 +166,24 @@ impl AppLauncher {
 }
 
 fn update_list_view(
-  list_view: &mut TypedListView<MyListItem, gtk::SingleSelection>,
+  list_view: &mut TypedListView<AppItem, gtk::SingleSelection>,
   apps: &[xdg::Application],
 ) {
   list_view.clear();
   for app in apps.into_iter() {
     let desktop_file = &app.desktop_file;
+
     let no_display = desktop_file.no_display.unwrap_or(false);
     if no_display {
       continue;
+    }
+
+    if let Some(only_show_in) = &desktop_file.only_show_in {
+      if let Some(desktop) = &*XDG_CURRENT_DESKTOP {
+        if !only_show_in.contains(desktop) {
+          continue;
+        }
+      }
     }
 
     let Some(ref icon) = desktop_file.icon else {
@@ -185,7 +194,7 @@ fn update_list_view(
     };
     let keywords = desktop_file.keywords.clone().unwrap_or_default();
 
-    list_view.append(MyListItem {
+    list_view.append(AppItem {
       id: app.id.clone(),
       icon: icon.clone(),
       name: name.clone(),
@@ -250,7 +259,7 @@ impl SimpleComponent for AppLauncher {
 
   fn init_root() -> Self::Root {
     gtk::Window::builder()
-      .title("Simple app")
+      .title("App Launcher")
       .default_width(350)
       .default_height(350)
       .visible(false)
@@ -309,7 +318,7 @@ impl SimpleComponent for AppLauncher {
     };
 
     let mut list_view_wrapper =
-      TypedListView::<MyListItem, gtk::SingleSelection>::new();
+      TypedListView::<AppItem, gtk::SingleSelection>::new();
 
     let list_view = list_view_wrapper.view.clone();
     let list_view_selection = list_view_wrapper.selection_model.clone();
@@ -455,10 +464,20 @@ impl SimpleComponent for AppLauncher {
             let second_starts_with = second_name.starts_with(&text);
 
             match (first_starts_with, second_starts_with) {
-              (true, false) => std::cmp::Ordering::Less,
-              (false, true) => std::cmp::Ordering::Greater,
-              _ => first_name.cmp(&second_name),
+              (true, false) => return std::cmp::Ordering::Less,
+              (false, true) => return std::cmp::Ordering::Greater,
+              _ => {},
             }
+
+            let first_contains = first_name.contains(&text);
+            let second_contains = second_name.contains(&text);
+            match (first_contains, second_contains) {
+              (true, false) => return std::cmp::Ordering::Less,
+              (false, true) => return std::cmp::Ordering::Greater,
+              _ => {},
+            }
+
+            first_name.cmp(&second_name)
           }
         });
 
