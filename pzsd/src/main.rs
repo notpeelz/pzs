@@ -533,7 +533,17 @@ impl SimpleComponent for AppLauncher {
   }
 }
 
-// TODO: struct ShellInterface {}
+struct ShellInterface {
+  msg_tx: broadcast::Sender<AppMsg>,
+}
+
+#[zbus::interface(name = "dev.peelz.pzs.Shell")]
+impl ShellInterface {
+  fn shutdown(&mut self) -> zbus::fdo::Result<()> {
+    self.msg_tx.send(AppMsg::Shutdown).expect("TODO");
+    Ok(())
+  }
+}
 
 struct AppLauncherInterface {
   msg_tx: broadcast::Sender<AppMsg>,
@@ -541,12 +551,6 @@ struct AppLauncherInterface {
 
 #[zbus::interface(name = "dev.peelz.pzs.AppLauncher")]
 impl AppLauncherInterface {
-  // TODO: move this to a different interface
-  fn shutdown(&mut self) -> zbus::fdo::Result<()> {
-    self.msg_tx.send(AppMsg::Shutdown).expect("TODO");
-    Ok(())
-  }
-
   async fn show(&mut self) -> zbus::fdo::Result<()> {
     self
       .msg_tx
@@ -582,34 +586,30 @@ async fn setup_dbus(
     format!("{DBUS_SESSION_BUS_ADDRESS} is not set or is invalid"),
   )?;
 
+  const PATH: &str = "/dev/peelz/pzs";
+
   let connection = zbus::connection::Builder::address(
     zbus::Address::from_str(&dbus_address)
       .wrap_err(format!("failed to parse {DBUS_SESSION_BUS_ADDRESS}"))?,
   )?
+  .serve_at(PATH, {
+    let msg_tx = msg_tx.clone();
+    ShellInterface { msg_tx }
+  })
+  .wrap_err("failed to register ShellInterface on bus")?
+  .serve_at(PATH, {
+    let msg_tx = msg_tx.clone();
+    AppLauncherInterface { msg_tx }
+  })
+  .wrap_err("failed to register AppLauncherInterface on bus")?
   .build()
   .await
   .wrap_err("failed to build dbus connection")?;
 
-  {
-    let object_server = connection.object_server();
-
-    object_server
-      .at("/dev/peelz/pzs", AppLauncherInterface { msg_tx })
-      .await
-      .wrap_err("failed to register bus interface")
-      .and_then(|x| {
-        if !x {
-          eyre::bail!("dbus interface is already registered")
-        }
-
-        Ok(())
-      })?;
-
-    connection
-      .request_name("dev.peelz.pzs")
-      .await
-      .wrap_err("failed to register name on bus")?;
-  }
+  connection
+    .request_name("dev.peelz.pzs")
+    .await
+    .wrap_err("failed to register name on bus")?;
 
   let connection_guard = async move {
     loop {
