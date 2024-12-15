@@ -2,6 +2,7 @@
 
 use tracing::error;
 
+mod app_launcher;
 mod list;
 mod main;
 mod xdg;
