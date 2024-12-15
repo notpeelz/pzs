@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use crate::list::{RelmListItem, TypedListView};
+use crate::list::{RelmListItem, TypedListItem, TypedListView};
 use crate::{xdg, XDG_CURRENT_DESKTOP};
 use eyre::bail;
 use eyre::{Context, Result};
@@ -322,6 +322,14 @@ impl SimpleComponent for AppLauncher {
 
     let list_view = list_view_wrapper.view.clone();
     let list_view_selection = list_view_wrapper.selection_model.clone();
+
+    list_view.connect_activate({
+      let sender = sender.clone();
+      move |_, _| {
+        sender.input(AppMsg::Run);
+      }
+    });
+
     sw.container_add(&list_view);
 
     list_view_wrapper.set_sorter(|first, second| {
