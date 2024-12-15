@@ -17,7 +17,8 @@ use gtk4::{gdk, prelude::WidgetExt};
 use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
 use relm4::{
-  ComponentParts, ComponentSender, RelmContainerExt, SimpleComponent,
+  prelude::{AsyncComponent, AsyncComponentParts},
+  AsyncComponentSender, RelmContainerExt, RelmWidgetExt,
 };
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -26,7 +27,6 @@ pub struct AppLauncherInit {
   pub visible: bool,
   pub msg_tx: broadcast::Sender<Msg>,
   pub msg_rx: broadcast::Receiver<Msg>,
-  pub apps: Vec<xdg::Application>,
 }
 
 pub struct AppLauncher {
@@ -248,12 +248,13 @@ fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
   Ok(())
 }
 
-impl SimpleComponent for AppLauncher {
+impl AsyncComponent for AppLauncher {
   type Init = AppLauncherInit;
   type Input = Msg;
   type Output = ();
   type Widgets = AppLauncherWidgets;
   type Root = gtk::Window;
+  type CommandOutput = ();
 
   fn init_root() -> Self::Root {
     gtk::Window::builder()
@@ -264,15 +265,28 @@ impl SimpleComponent for AppLauncher {
       .build()
   }
 
-  fn init(
+  async fn init(
     init: Self::Init,
     window: Self::Root,
-    sender: ComponentSender<Self>,
-  ) -> ComponentParts<Self> {
+    sender: AsyncComponentSender<Self>,
+  ) -> AsyncComponentParts<Self> {
+    let apps = xdg::read_applications()
+      .await
+      .expect("failed to read applications");
+
+    relm4::set_global_css(
+      "listview > row:selected {
+        background-color: #3b3e9380;
+      }",
+    );
+
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_visible(init.visible);
     window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
+
+    window.inline_css("border-radius: 12px 12px 12px 12px");
+    window.inline_css("border: 2px solid #3b3e93");
 
     let vbox = gtk::Box::builder()
       .orientation(gtk::Orientation::Vertical)
@@ -281,9 +295,15 @@ impl SimpleComponent for AppLauncher {
 
     let input = gtk::SearchEntry::builder()
       .margin_top(10)
+      .margin_start(10)
+      .margin_end(10)
       .search_delay(0)
       .placeholder_text("Search")
       .build();
+
+    input.inline_css("border: 2px solid #3b3e93");
+    input.inline_css("border-radius: 50px");
+    input.inline_css("outline: none");
 
     let sw = gtk::ScrolledWindow::builder()
       .vexpand(true)
@@ -336,7 +356,7 @@ impl SimpleComponent for AppLauncher {
       first_name.cmp(&second_name)
     });
 
-    update_list_view(&mut list_view_wrapper, &init.apps);
+    update_list_view(&mut list_view_wrapper, &apps);
     {
       let sender = sender.clone();
       input.connect_search_changed(move |input| {
@@ -434,7 +454,7 @@ impl SimpleComponent for AppLauncher {
 
     let widgets = AppLauncherWidgets { window };
 
-    ComponentParts { model, widgets }
+    AsyncComponentParts { model, widgets }
   }
 
   fn shutdown(
@@ -451,7 +471,12 @@ impl SimpleComponent for AppLauncher {
       .remove();
   }
 
-  fn update(&mut self, msg: Self::Input, _sender: ComponentSender<Self>) {
+  async fn update(
+    &mut self,
+    msg: Self::Input,
+    _sender: AsyncComponentSender<Self>,
+    _root: &Self::Root,
+  ) {
     match msg {
       Msg::Shutdown => {},
       Msg::AppLauncherMsg(AppLauncherMsg::UpdateApps(new_apps)) => {
@@ -529,11 +554,10 @@ impl SimpleComponent for AppLauncher {
     }
   }
 
-  // Update the view to represent the updated model.
   fn update_view(
     &self,
     widgets: &mut Self::Widgets,
-    _sender: ComponentSender<Self>,
+    _sender: AsyncComponentSender<Self>,
   ) {
     widgets.window.set_visible(self.visible);
   }

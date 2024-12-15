@@ -3,7 +3,6 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use crate::app_launcher::{AppLauncher, AppLauncherInit, AppLauncherMsg};
-use crate::xdg;
 use eyre::{Context, Result};
 use gio::glib;
 use gtk4::{self as gtk, prelude::GtkApplicationExt};
@@ -13,33 +12,30 @@ use tracing::error;
 
 struct Init {
   msg_tx: broadcast::Sender<Msg>,
-  apps: Vec<xdg::Application>,
 }
 
 struct Main {}
 
-impl SimpleComponent for Main {
+impl AsyncComponent for Main {
   type Init = Init;
   type Input = Msg;
   type Output = ();
   type Widgets = ();
   type Root = gtk::Window;
+  type CommandOutput = ();
 
   fn init_root() -> Self::Root {
     gtk::Window::builder().visible(false).build()
   }
 
-  fn init(
+  async fn init(
     init: Self::Init,
     _root: Self::Root,
-    _sender: ComponentSender<Self>,
-  ) -> ComponentParts<Self> {
+    _sender: AsyncComponentSender<Self>,
+  ) -> AsyncComponentParts<Self> {
     let app = relm4::main_application();
     let builder = AppLauncher::builder();
 
-    // Add window to the GTK application.
-    // This ensures that the app will live as long
-    // as at least one window exists.
     app.add_window(&builder.root);
 
     builder
@@ -47,11 +43,10 @@ impl SimpleComponent for Main {
         visible: false,
         msg_tx: init.msg_tx.clone(),
         msg_rx: init.msg_tx.subscribe(),
-        apps: init.apps,
       })
       .detach_runtime();
 
-    ComponentParts {
+    AsyncComponentParts {
       model: Main {},
       widgets: (),
     }
@@ -189,17 +184,13 @@ fn run_gtk(init: Init) {
 
     let app = RelmApp::new("dev.peelz.pzs").visible_on_activate(false);
     app.allow_multiple_instances(true);
-    app.run::<Main>(init);
+    app.run_async::<Main>(init);
   })
   .unwrap();
 }
 
 pub async fn main() {
   let (msg_tx, _) = broadcast::channel::<Msg>(10);
-
-  let apps = xdg::read_applications()
-    .await
-    .expect("failed to read applications");
 
   let (dbus_connection, dbus_shutdown) = match setup_dbus(DbusInit {
     msg_tx: msg_tx.clone(),
@@ -215,7 +206,7 @@ pub async fn main() {
   };
   let gtk = tokio::task::spawn_blocking({
     let msg_tx = msg_tx.clone();
-    move || run_gtk(Init { msg_tx, apps })
+    move || run_gtk(Init { msg_tx })
   });
 
   let app_launcher = tokio::task::spawn({
