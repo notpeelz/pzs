@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use crate::list::{RelmListItem, TypedListItem, TypedListView};
+use crate::list::{RelmListItem, TypedListView};
 use crate::{xdg, XDG_CURRENT_DESKTOP};
 use eyre::bail;
 use eyre::{Context, Result};
@@ -62,12 +62,12 @@ struct AppItem {
   keywords: Vec<String>,
 }
 
-struct MyListItemWidgets {
+struct AppItemWidgets {
   image: gtk::Image,
   label: gtk::Label,
 }
 
-impl Drop for MyListItemWidgets {
+impl Drop for AppItemWidgets {
   fn drop(&mut self) {
     // dbg!(self.label.label());
   }
@@ -75,9 +75,9 @@ impl Drop for MyListItemWidgets {
 
 impl RelmListItem for AppItem {
   type Root = gtk::Box;
-  type Widgets = MyListItemWidgets;
+  type Widgets = AppItemWidgets;
 
-  fn setup(_item: &gtk::ListItem) -> (gtk::Box, MyListItemWidgets) {
+  fn setup(_item: &gtk::ListItem) -> (gtk::Box, AppItemWidgets) {
     relm4::view! {
       my_box = gtk::Box {
         #[name = "image"]
@@ -90,13 +90,13 @@ impl RelmListItem for AppItem {
 
     image.set_pixel_size(48);
 
-    let widgets = MyListItemWidgets { image, label };
+    let widgets = AppItemWidgets { image, label };
 
     (my_box, widgets)
   }
 
   fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
-    let MyListItemWidgets { image, label } = widgets;
+    let AppItemWidgets { image, label } = widgets;
 
     let icon = if self.icon.starts_with('/') {
       IconPaintable::for_file(&gio::File::for_path(&self.icon), 48, 1)
@@ -666,7 +666,7 @@ fn run_gtk(app_init: AppLauncherInit) {
   .unwrap();
 }
 
-pub(crate) async fn main() {
+pub async fn main() {
   let (msg_tx, _) = broadcast::channel::<AppMsg>(10);
 
   let (dbus_connection, dbus_shutdown) = match setup_dbus(DbusInit {
