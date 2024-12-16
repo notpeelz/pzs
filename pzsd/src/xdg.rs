@@ -15,7 +15,6 @@ pub static BASEDIRS: Lazy<::xdg::BaseDirectories> =
 #[derive(Debug, Clone)]
 pub struct Application {
   pub id: String,
-  pub desktop_file_path: PathBuf,
   pub desktop_file: DesktopFile,
 }
 
@@ -147,7 +146,6 @@ pub async fn read_applications() -> Result<Vec<Application>> {
         app_id.clone(),
         Application {
           id: app_id,
-          desktop_file_path: desktop_path,
           desktop_file,
         },
       );

@@ -1,8 +1,8 @@
 use std::{sync::atomic::AtomicBool, time::Duration};
 
 use crate::{
+  dbus::{Messenger, Msg},
   list::{RelmListItem, TypedListView},
-  main::Msg,
   xdg, XDG_CURRENT_DESKTOP,
 };
 use eyre::bail;
@@ -25,8 +25,7 @@ use tracing::{info, warn};
 
 pub struct AppLauncherInit {
   pub visible: bool,
-  pub msg_tx: broadcast::Sender<Msg>,
-  pub msg_rx: broadcast::Receiver<Msg>,
+  pub messenger: Messenger,
 }
 
 pub struct AppLauncher {
@@ -35,6 +34,31 @@ pub struct AppLauncher {
   list_view_wrapper: TypedListView<AppItem, gtk::SingleSelection>,
   input: gtk::SearchEntry,
   handle: Option<glib::JoinHandle<()>>,
+}
+
+pub struct AppLauncherInterface {
+  pub messenger: Messenger,
+}
+
+#[zbus::interface(name = "dev.peelz.pzs.AppLauncher")]
+impl AppLauncherInterface {
+  fn show(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .messenger
+      .send_msg(AppLauncherMsg::SetVisibility(true))
+  }
+
+  fn hide(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .messenger
+      .send_msg(AppLauncherMsg::SetVisibility(false))
+  }
+
+  fn toggle(&mut self) -> zbus::fdo::Result<()> {
+    self
+      .messenger
+      .send_msg(AppLauncherMsg::ToggleVisibility)
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -63,12 +87,6 @@ struct AppItem {
 struct AppItemWidgets {
   image: gtk::Image,
   label: gtk::Label,
-}
-
-impl Drop for AppItemWidgets {
-  fn drop(&mut self) {
-    // dbg!(self.label.label());
-  }
 }
 
 impl RelmListItem for AppItem {
@@ -316,16 +334,16 @@ impl AsyncComponent for AppLauncher {
 
     let handle = {
       let sender = sender.clone();
-      let mut msg_rx = init.msg_rx;
+      let mut messenger = init.messenger;
       relm4::spawn_local(async move {
         loop {
-          let msg = match msg_rx.recv().await {
+          let msg = match messenger.rx().recv().await {
             Ok(msg) => msg,
             Err(broadcast::error::RecvError::Closed) => {
               break;
             },
             Err(broadcast::error::RecvError::Lagged(_)) => {
-              // TODO: log lag?
+              warn!("app_launcher receiver lagged");
               continue;
             },
           };
@@ -563,11 +581,11 @@ impl AsyncComponent for AppLauncher {
   }
 }
 
-pub async fn run(msg_tx: broadcast::Sender<Msg>) {
-  watch_apps(msg_tx).await
+pub async fn run(messenger: Messenger) {
+  watch_apps(messenger).await
 }
 
-async fn watch_apps(msg_tx: broadcast::Sender<Msg>) {
+async fn watch_apps(mut messenger: Messenger) {
   let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel();
   let mut watcher = notify::INotifyWatcher::new(
     move |event| {
@@ -618,7 +636,8 @@ async fn watch_apps(msg_tx: broadcast::Sender<Msg>) {
     let apps = xdg::read_applications()
       .await
       .expect("failed to read applications");
-    msg_tx
+    messenger
+      .tx()
       .send(AppLauncherMsg::UpdateApps(apps).into())
       .unwrap();
     dirty.store(false, std::sync::atomic::Ordering::SeqCst);
