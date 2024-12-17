@@ -7,10 +7,13 @@ use crate::{
 };
 use eyre::bail;
 use eyre::Result;
-use gio::{glib, prelude::ListModelExt};
+use gio::{
+  glib,
+  prelude::{ListModelExt, ObjectExt},
+};
 use gtk4::{
   self as gtk,
-  prelude::{EditableExt, EventControllerExt},
+  prelude::{EditableExt, EventControllerExt, GtkWindowExt},
   IconPaintable,
 };
 use gtk4::{gdk, prelude::WidgetExt};
@@ -300,6 +303,15 @@ impl AsyncComponent for AppLauncher {
     window.set_visible(init.visible);
     window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
     window.add_css_class("app-launcher");
+
+    window.connect_notify_local(Some("is-active"), {
+      let sender = sender.clone();
+      move |win, _| {
+        if !win.is_active() {
+          sender.input(AppLauncherMsg::SetVisibility(false).into());
+        }
+      }
+    });
 
     let vbox = gtk::Box::builder()
       .orientation(gtk::Orientation::Vertical)
