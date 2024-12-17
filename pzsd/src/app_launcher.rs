@@ -18,7 +18,7 @@ use gtk4_layer_shell::{Layer, LayerShell};
 use notify::Watcher;
 use relm4::{
   prelude::{AsyncComponent, AsyncComponentParts},
-  AsyncComponentSender, RelmContainerExt, RelmWidgetExt,
+  AsyncComponentSender, RelmContainerExt,
 };
 use tokio::sync::broadcast;
 use tracing::{info, warn};
@@ -97,14 +97,17 @@ impl RelmListItem for AppItem {
     relm4::view! {
       my_box = gtk::Box {
         #[name = "image"]
-        gtk::Image,
+        gtk::Image {
+          add_css_class: "app-icon",
+          set_pixel_size: 48,
+        },
 
         #[name = "label"]
-        gtk::Label,
+        gtk::Label {
+          add_css_class: "app-label",
+        }
       }
     }
-
-    image.set_pixel_size(48);
 
     let widgets = AppItemWidgets { image, label };
 
@@ -292,19 +295,11 @@ impl AsyncComponent for AppLauncher {
       .await
       .expect("failed to read applications");
 
-    relm4::set_global_css(
-      "listview > row:selected {
-        background-color: #3b3e9380;
-      }",
-    );
-
     window.init_layer_shell();
     window.set_layer(Layer::Overlay);
     window.set_visible(init.visible);
     window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
-
-    window.inline_css("border-radius: 12px 12px 12px 12px");
-    window.inline_css("border: 2px solid #3b3e93");
+    window.add_css_class("app-launcher");
 
     let vbox = gtk::Box::builder()
       .orientation(gtk::Orientation::Vertical)
@@ -317,11 +312,8 @@ impl AsyncComponent for AppLauncher {
       .margin_end(10)
       .search_delay(0)
       .placeholder_text("Search")
+      .css_classes(["search"])
       .build();
-
-    input.inline_css("border: 2px solid #3b3e93");
-    input.inline_css("border-radius: 50px");
-    input.inline_css("outline: none");
 
     let sw = gtk::ScrolledWindow::builder()
       .vexpand(true)

@@ -1,0 +1,18 @@
+.app-launcher {
+  border-radius: 12px;
+  border: 2px solid #3b3e93;
+}
+
+.app-launcher listview > row:selected {
+  background-color: #3b3e9380;
+}
+
+.app-launcher .search {
+  border: 2px solid #3b3e93;
+  border-radius: 50px;
+  outline: none;
+}
+
+.app-launcher .app-icon {
+  padding: 0 4px;
+}

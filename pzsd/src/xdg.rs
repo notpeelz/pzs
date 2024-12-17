@@ -108,10 +108,7 @@ pub async fn read_applications() -> Result<Vec<Application>> {
 
       let app_id = {
         let path = entry.path();
-        let path = path
-          .strip_prefix(&d)
-          // this shouldn't ever panic
-          .unwrap();
+        let path = path.strip_prefix(&d).unwrap();
 
         // remove file name
         let count = path.components().count();

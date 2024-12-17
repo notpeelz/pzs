@@ -92,6 +92,9 @@ fn run_gtk(init: Init) {
 
     let app = RelmApp::new("dev.peelz.pzs").visible_on_activate(false);
     app.allow_multiple_instances(true);
+
+    relm4::set_global_css(include_str!("app_launcher.css"));
+
     app.run_async::<Main>(init);
   })
   .unwrap();

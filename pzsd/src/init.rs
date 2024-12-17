@@ -1,7 +1,5 @@
 #![allow(special_module_name)]
 
-use tracing::error;
-
 mod app_launcher;
 mod dbus;
 mod list;
@@ -26,7 +24,7 @@ fn main() {
       rt.shutdown_background();
     },
     Err(err) => {
-      error!("failed to create tokio runtime: {:?}", err);
+      panic!("failed to create tokio runtime: {:?}", err);
     },
   }
 }
