@@ -6,9 +6,15 @@ mod list;
 mod main;
 mod xdg;
 
-pub static XDG_CURRENT_DESKTOP: once_cell::sync::Lazy<Option<String>> =
-  once_cell::sync::Lazy::<Option<String>>::new(|| {
-    std::env::var("XDG_CURRENT_DESKTOP").ok()
+pub static XDG_CURRENT_DESKTOP: once_cell::sync::Lazy<Option<Vec<String>>> =
+  once_cell::sync::Lazy::<Option<Vec<String>>>::new(|| {
+    std::env::var("XDG_CURRENT_DESKTOP")
+      .ok()
+      .map(|x| {
+        x.split(':')
+          .map(ToString::to_string)
+          .collect::<Vec<_>>()
+      })
   });
 
 fn main() {
