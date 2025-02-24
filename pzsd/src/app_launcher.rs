@@ -1,11 +1,11 @@
-use std::{sync::atomic::AtomicBool, time::Duration};
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 use crate::{
   dbus::{Messenger, Msg},
   list::{RelmListItem, TypedListView},
   xdg, XDG_CURRENT_DESKTOP,
 };
-use eyre::bail;
 use eyre::Result;
 use gio::{
   glib,
@@ -24,15 +24,17 @@ use relm4::{
   AsyncComponentSender, RelmContainerExt,
 };
 use tokio::sync::broadcast;
-use tracing::{info, warn};
+use tracing::warn;
 
 pub struct AppLauncherInit {
   pub visible: bool,
+  pub dbus_connection: zbus::Connection,
   pub messenger: Messenger,
 }
 
 pub struct AppLauncher {
   visible: bool,
+  dbus_connection: zbus::Connection,
   new_apps: Option<Vec<xdg::Application>>,
   list_view_wrapper: TypedListView<AppItem, gtk::SingleSelection>,
   input: gtk::SearchEntry,
@@ -80,12 +82,7 @@ impl Into<Msg> for AppLauncherMsg {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct AppItem {
-  id: String,
-  icon: String,
-  name: String,
-  keywords: Vec<String>,
-}
+struct AppItem(pub xdg::Application);
 
 struct AppItemWidgets {
   image: gtk::Image,
@@ -120,35 +117,40 @@ impl RelmListItem for AppItem {
   fn bind(&mut self, widgets: &mut Self::Widgets, _root: &mut Self::Root) {
     let AppItemWidgets { image, label } = widgets;
 
-    let icon = if self.icon.starts_with('/') {
-      IconPaintable::for_file(&gio::File::for_path(&self.icon), 48, 1)
-    } else {
-      let theme =
-        gtk::IconTheme::for_display(&gdk::Display::default().unwrap());
+    if let Some(name) = &self.0.name {
+      label.set_label(&name);
+    }
 
-      if theme.has_icon(&self.icon) {
-        theme.lookup_icon(
-          &self.icon,
-          &[],
-          48,
-          1,
-          gtk::TextDirection::None,
-          gtk::IconLookupFlags::empty(),
-        )
+    if let Some(icon) = &self.0.icon {
+      let icon = if icon.starts_with('/') {
+        IconPaintable::for_file(&gio::File::for_path(&icon), 48, 1)
       } else {
-        theme.lookup_icon(
-          "application-x-executable",
-          &[],
-          48,
-          1,
-          gtk::TextDirection::None,
-          gtk::IconLookupFlags::empty(),
-        )
-      }
-    };
+        let theme =
+          gtk::IconTheme::for_display(&gdk::Display::default().unwrap());
 
-    image.set_paintable(Some(&icon));
-    label.set_label(&self.name);
+        if theme.has_icon(&icon) {
+          theme.lookup_icon(
+            &icon,
+            &[],
+            48,
+            1,
+            gtk::TextDirection::None,
+            gtk::IconLookupFlags::empty(),
+          )
+        } else {
+          theme.lookup_icon(
+            "application-x-executable",
+            &[],
+            48,
+            1,
+            gtk::TextDirection::None,
+            gtk::IconLookupFlags::empty(),
+          )
+        }
+      };
+
+      image.set_paintable(Some(&icon));
+    }
   }
 }
 
@@ -164,7 +166,7 @@ impl AppLauncher {
     if visible {
       if let Some(new_apps) = self.new_apps.take() {
         self.new_apps = None;
-        update_list_view(&mut self.list_view_wrapper, &new_apps);
+        update_list_view(&mut self.list_view_wrapper, new_apps);
       }
     }
   }
@@ -189,11 +191,11 @@ impl AppLauncher {
 
 fn update_list_view(
   list_view: &mut TypedListView<AppItem, gtk::SingleSelection>,
-  apps: &[xdg::Application],
+  apps: Vec<xdg::Application>,
 ) {
   list_view.clear();
   for app in apps.into_iter() {
-    let desktop_file = &app.desktop_file;
+    let desktop_file = &app;
 
     let no_display = desktop_file.no_display.unwrap_or(false);
     if no_display {
@@ -201,75 +203,31 @@ fn update_list_view(
     }
 
     if let Some(only_show_in) = &desktop_file.only_show_in {
-      if let Some(desktop) = &*XDG_CURRENT_DESKTOP {
-        if !only_show_in.contains(desktop) {
-          continue;
+      if let Some(desktops) = &*XDG_CURRENT_DESKTOP {
+        for desktop in desktops {
+          if !only_show_in.contains(desktop) {
+            continue;
+          }
         }
       }
     }
 
-    let Some(ref icon) = desktop_file.icon else {
-      continue;
-    };
-    let Some(ref name) = desktop_file.name else {
-      continue;
-    };
-    let keywords = desktop_file.keywords.clone().unwrap_or_default();
-
-    list_view.append(AppItem {
-      id: app.id.clone(),
-      icon: icon.clone(),
-      name: name.clone(),
-      keywords,
-    });
+    list_view.append(AppItem(app));
   }
 }
 
-fn launch_app<S: AsRef<str>>(id: S) -> Result<()> {
-  let id = id.as_ref();
-  info!("launching app \"{}\"", id);
+impl AppLauncher {
+  async fn launch_app(&self, app: &AppItem) -> Result<()> {
+    let Some(exec) = &app.0.exec else {
+      return Ok(());
+    };
 
-  let id = format!("{id}.desktop");
-  let id = std::ffi::CString::new(id)?;
+    // TODO: parsing
 
-  match unsafe { nix::unistd::fork() } {
-    Ok(nix::unistd::ForkResult::Child) => {
-      let _ = nix::unistd::setsid();
+    crate::spawning::spawn(exec, &[] as &[&str]);
 
-      match unsafe { nix::unistd::fork() } {
-        Ok(nix::unistd::ForkResult::Child) => unsafe {
-          let fd = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
-          if fd < 0 {
-            libc::_exit(0);
-          }
-
-          if libc::dup2(fd, libc::STDOUT_FILENO) < 0
-            || libc::dup2(fd, libc::STDERR_FILENO) < 0
-            || libc::dup2(fd, libc::STDIN_FILENO) < 0
-          {
-            libc::_exit(0);
-          }
-
-          libc::close(fd);
-          let _ = nix::unistd::execvp(c"uwsm", &[c"uwsm", c"app", c"--", &id]);
-
-          libc::_exit(0);
-        },
-        Ok(nix::unistd::ForkResult::Parent { .. }) => {},
-        Err(_) => {},
-      }
-
-      unsafe { libc::_exit(0) };
-    },
-    Ok(nix::unistd::ForkResult::Parent { child }) => {
-      nix::sys::wait::waitpid(child, None).unwrap();
-    },
-    Err(err) => {
-      bail!("fork failed: {}", err.desc());
-    },
+    Ok(())
   }
-
-  Ok(())
 }
 
 impl AsyncComponent for AppLauncher {
@@ -373,12 +331,22 @@ impl AsyncComponent for AppLauncher {
     sw.container_add(&list_view);
 
     list_view_wrapper.set_sorter(|first, second| {
-      let first_name = first.name.to_lowercase();
-      let second_name = second.name.to_lowercase();
+      let first_name = first
+        .0
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+      let second_name = second
+        .0
+        .name
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
       first_name.cmp(&second_name)
     });
 
-    update_list_view(&mut list_view_wrapper, &apps);
+    update_list_view(&mut list_view_wrapper, apps);
     {
       let sender = sender.clone();
       input.connect_search_changed(move |input| {
@@ -468,6 +436,7 @@ impl AsyncComponent for AppLauncher {
 
     let model = AppLauncher {
       visible: init.visible,
+      dbus_connection: init.dbus_connection,
       new_apps: None,
       list_view_wrapper,
       input,
@@ -510,8 +479,18 @@ impl AsyncComponent for AppLauncher {
         self.list_view_wrapper.set_sorter({
           let text = text.to_lowercase();
           move |first, second| {
-            let first_name = first.name.to_lowercase();
-            let second_name = second.name.to_lowercase();
+            let first_name = first
+              .0
+              .name
+              .as_deref()
+              .unwrap_or_default()
+              .to_lowercase();
+            let second_name = second
+              .0
+              .name
+              .as_deref()
+              .unwrap_or_default()
+              .to_lowercase();
 
             let first_starts_with = first_name.starts_with(&text);
             let second_starts_with = second_name.starts_with(&text);
@@ -536,11 +515,18 @@ impl AsyncComponent for AppLauncher {
 
         self.list_view_wrapper.clear_filters();
         self.list_view_wrapper.add_filter(move |item| {
-          if item.name.to_lowercase().contains(&text) {
+          if item
+            .0
+            .name
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase()
+            .contains(&text)
+          {
             return true;
           }
 
-          for k in &item.keywords {
+          for k in item.0.keywords.as_deref().unwrap_or_default() {
             if k.to_lowercase().contains(&text) {
               return true;
             }
@@ -568,8 +554,9 @@ impl AsyncComponent for AppLauncher {
 
         if let Some(item) = self.list_view_wrapper.get_visible(selected) {
           let item = item.borrow();
-          if let Err(err) = launch_app(&item.id) {
-            warn!("failed to launch {}: {}", item.id, err);
+          if let Err(err) = self.launch_app(&item).await {
+            panic!("failed to launch {}: {}", item.0.id, err);
+            warn!("failed to launch {}: {}", item.0.id, err);
           }
         }
       },

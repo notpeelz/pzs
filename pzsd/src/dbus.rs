@@ -92,7 +92,7 @@ pub async fn setup(
       match messenger.rx().recv().await {
         Ok(Msg::Shutdown) | Err(broadcast::error::RecvError::Closed) => break,
         Err(broadcast::error::RecvError::Lagged(_)) => {
-          warn!("dbus messenger lagged");
+          warn!("dbus receiver lagged");
         },
         _ => (),
       };

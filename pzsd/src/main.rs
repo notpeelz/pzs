@@ -12,6 +12,7 @@ use tracing::{debug, error, warn};
 
 struct Init {
   messenger: Messenger,
+  dbus_connection: zbus::Connection,
 }
 
 struct Main {}
@@ -41,6 +42,7 @@ impl AsyncComponent for Main {
     builder
       .launch(AppLauncherInit {
         visible: false,
+        dbus_connection: init.dbus_connection,
         messenger: init.messenger,
       })
       .detach_runtime();
@@ -113,7 +115,13 @@ pub async fn main() {
     };
   let gtk = tokio::task::spawn_blocking({
     let messenger = messenger.clone();
-    move || run_gtk(Init { messenger })
+    let dbus_connection = dbus_connection.clone();
+    move || {
+      run_gtk(Init {
+        messenger,
+        dbus_connection,
+      })
+    }
   });
 
   let app_launcher =

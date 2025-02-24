@@ -12,25 +12,24 @@ use walkdir::WalkDir;
 pub static BASEDIRS: Lazy<::xdg::BaseDirectories> =
   Lazy::new(|| ::xdg::BaseDirectories::new().unwrap());
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Application {
   pub id: String,
-  pub desktop_file: DesktopFile,
-}
-
-#[derive(Debug, Clone)]
-pub struct DesktopFile {
   pub no_display: Option<bool>,
   pub icon: Option<String>,
   pub name: Option<String>,
+  pub exec: Option<String>,
   pub keywords: Option<Vec<String>>,
   pub only_show_in: Option<Vec<String>>,
 }
 
-impl DesktopFile {
-  async fn from_reader<R: tokio::io::AsyncRead + Unpin>(
+impl Application {
+  async fn from_reader<S: ToString, R: tokio::io::AsyncRead + Unpin>(
+    id: S,
     mut r: R,
-  ) -> Result<DesktopFile> {
+  ) -> Result<Application> {
+    let id = id.to_string();
+
     let mut buf = Vec::<u8>::new();
     r.read_to_end(&mut buf).await?;
 
@@ -63,6 +62,7 @@ impl DesktopFile {
 
     let icon = entry.get("Icon").map(|x| x.to_owned());
     let name = entry.get("Name").map(|x| x.to_owned());
+    let exec = entry.get("Exec").map(|x| x.to_owned());
     let keywords = entry.get("Keywords").map(|x| {
       x.split(";")
         .map(|k| k.to_owned())
@@ -74,10 +74,12 @@ impl DesktopFile {
         .collect::<Vec<_>>()
     });
 
-    Ok(DesktopFile {
+    Ok(Application {
+      id,
       no_display,
       icon,
       name,
+      exec,
       keywords,
       only_show_in,
     })
@@ -127,7 +129,13 @@ pub async fn read_applications() -> Result<Vec<Application>> {
 
       let desktop_path = entry.into_path();
 
-      let desktop_file = match read_desktop_file(&desktop_path).await {
+      let desktop_file = match {
+        let r = tokio::fs::File::open(&desktop_path).await?;
+
+        Application::from_reader(&app_id, r)
+          .await
+          .wrap_err("invalid desktop file")
+      } {
         Ok(f) => f,
         Err(r) => {
           let r = r.wrap_err(format!(
@@ -139,23 +147,9 @@ pub async fn read_applications() -> Result<Vec<Application>> {
         },
       };
 
-      m.insert(
-        app_id.clone(),
-        Application {
-          id: app_id,
-          desktop_file,
-        },
-      );
+      m.insert(app_id.clone(), desktop_file);
     }
   }
 
   Ok(m.into_values().collect::<Vec<_>>())
-}
-
-async fn read_desktop_file(desktop_path: &PathBuf) -> Result<DesktopFile> {
-  let r = tokio::fs::File::open(desktop_path).await?;
-
-  DesktopFile::from_reader(r)
-    .await
-    .wrap_err("invalid desktop file")
 }
