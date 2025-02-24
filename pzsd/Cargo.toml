@@ -22,7 +22,3 @@ tracing = "0.1.40"
 walkdir = "2.5.0"
 xdg = "2.5.2"
 zbus = { git = "https://github.com/dbus2/zbus.git", rev = "46fc45c67e7f9718ab0f41364b16cec9719c6528", features = ["tokio"], default-features = false }
-
-[[bin]]
-name = "pzsd"
-path = "src/lib.rs"

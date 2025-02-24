@@ -10,6 +10,41 @@ use relm4::prelude::*;
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
+mod app_launcher;
+mod dbus;
+mod list;
+mod spawning;
+mod xdg;
+
+pub static XDG_CURRENT_DESKTOP: once_cell::sync::Lazy<Option<Vec<String>>> =
+  once_cell::sync::Lazy::<Option<Vec<String>>>::new(|| {
+    std::env::var("XDG_CURRENT_DESKTOP")
+      .ok()
+      .map(|x| {
+        x.split(':')
+          .map(ToString::to_string)
+          .collect::<Vec<_>>()
+      })
+  });
+
+fn main() {
+  match tokio::runtime::Builder::new_multi_thread()
+    .worker_threads(2)
+    .max_blocking_threads(20)
+    .enable_time()
+    .enable_io()
+    .build()
+  {
+    Ok(rt) => {
+      rt.block_on(real_main());
+      rt.shutdown_background();
+    },
+    Err(err) => {
+      panic!("failed to create tokio runtime: {:?}", err);
+    },
+  }
+}
+
 struct Init {
   messenger: Messenger,
   dbus_connection: zbus::Connection,
@@ -102,7 +137,7 @@ fn run_gtk(init: Init) {
   .unwrap();
 }
 
-pub async fn main() {
+pub async fn real_main() {
   let mut messenger = Messenger::new(10);
 
   let (dbus_connection, dbus_shutdown) =

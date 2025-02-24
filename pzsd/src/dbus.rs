@@ -67,7 +67,7 @@ pub async fn setup(
       .wrap_err(format!("failed to parse {DBUS_SESSION_BUS_ADDRESS}"))?,
   )?
   .serve_at(PATH, {
-    crate::main::ShellInterface {
+    crate::ShellInterface {
       messenger: messenger.clone(),
     }
   })
