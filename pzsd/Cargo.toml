@@ -19,6 +19,7 @@ rust-ini = "0.21.1"
 rustix = { version = "0.38.43", features = ["all-apis"] }
 tokio = { version = "1.39.3", features = ["full"] }
 tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 walkdir = "2.5.0"
 xdg = "2.5.2"
 zbus = { git = "https://github.com/dbus2/zbus.git", rev = "46fc45c67e7f9718ab0f41364b16cec9719c6528", features = ["tokio"], default-features = false }

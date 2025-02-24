@@ -9,6 +9,7 @@ use gtk4::{self as gtk, prelude::GtkApplicationExt};
 use relm4::prelude::*;
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
+use tracing_subscriber::EnvFilter;
 
 mod app_launcher;
 mod dbus;
@@ -27,7 +28,18 @@ pub static XDG_CURRENT_DESKTOP: once_cell::sync::Lazy<Option<Vec<String>>> =
       })
   });
 
+const DEFAULT_LOG_FILTER: &str = "pzsd=debug";
+
 fn main() {
+  tracing_subscriber::fmt()
+    .compact()
+    .with_env_filter({
+      let directives = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_owned());
+      EnvFilter::builder().parse_lossy(directives)
+    })
+    .init();
+
   match tokio::runtime::Builder::new_multi_thread()
     .worker_threads(2)
     .max_blocking_threads(20)

@@ -6,7 +6,7 @@ use crate::{
   list::{RelmListItem, TypedListView},
   xdg, XDG_CURRENT_DESKTOP,
 };
-use eyre::Result;
+use eyre::{bail, Result};
 use gio::{
   glib,
   prelude::{ListModelExt, ObjectExt},
@@ -219,7 +219,7 @@ fn update_list_view(
 impl AppLauncher {
   async fn launch_app(&self, app: &AppItem) -> Result<()> {
     let Some(exec) = &app.0.exec else {
-      return Ok(());
+      bail!("app doesn't have an Exec property");
     };
 
     // TODO: parsing
@@ -555,7 +555,6 @@ impl AsyncComponent for AppLauncher {
         if let Some(item) = self.list_view_wrapper.get_visible(selected) {
           let item = item.borrow();
           if let Err(err) = self.launch_app(&item).await {
-            panic!("failed to launch {}: {}", item.0.id, err);
             warn!("failed to launch {}: {}", item.0.id, err);
           }
         }
