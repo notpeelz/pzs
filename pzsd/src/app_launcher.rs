@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::{
   dbus::{Messenger, Msg},
   list::{RelmListItem, TypedListView},
+  shell::shell_parse_args,
   xdg, XDG_CURRENT_DESKTOP,
 };
 use eyre::{bail, Result};
@@ -24,7 +25,7 @@ use relm4::{
   AsyncComponentSender, RelmContainerExt,
 };
 use tokio::sync::broadcast;
-use tracing::warn;
+use tracing::{debug, warn};
 
 pub struct AppLauncherInit {
   pub visible: bool,
@@ -218,13 +219,20 @@ fn update_list_view(
 
 impl AppLauncher {
   async fn launch_app(&self, app: &AppItem) -> Result<()> {
-    let Some(exec) = &app.0.exec else {
-      bail!("app doesn't have an Exec property");
+    let exec = app.0.expand_exec(&[])?;
+    let (exe, args) = {
+      let mut v = shell_parse_args(&exec);
+      if v.is_empty() {
+        bail!("the Exec property can't be empty");
+      }
+
+      let args = v.split_off(1);
+      (v[0].clone(), args)
     };
 
-    // TODO: parsing
+    debug!(?exec, ?exe, ?args, "launching app");
 
-    crate::spawning::spawn(exec, &[] as &[&str]);
+    crate::spawning::spawn(exe, args);
 
     Ok(())
   }
@@ -252,7 +260,7 @@ impl AsyncComponent for AppLauncher {
     window: Self::Root,
     sender: AsyncComponentSender<Self>,
   ) -> AsyncComponentParts<Self> {
-    let apps = xdg::read_applications()
+    let apps = xdg::application::read_applications()
       .await
       .expect("failed to read applications");
 
@@ -623,7 +631,7 @@ async fn watch_apps(mut messenger: Messenger) {
       },
     }
 
-    let apps = xdg::read_applications()
+    let apps = xdg::application::read_applications()
       .await
       .expect("failed to read applications");
     messenger

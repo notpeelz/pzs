@@ -1,6 +1,5 @@
-mod application;
+pub mod application;
 
-pub use application::read_applications;
 pub use application::Application;
 use once_cell::sync::Lazy;
 

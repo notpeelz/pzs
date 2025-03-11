@@ -14,6 +14,7 @@ use tracing_subscriber::EnvFilter;
 mod app_launcher;
 mod dbus;
 mod list;
+mod shell;
 mod spawning;
 mod xdg;
 

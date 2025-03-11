@@ -1578,6 +1578,7 @@ dependencies = [
  "nix",
  "notify",
  "once_cell",
+ "regex",
  "relm4",
  "rust-ini",
  "rustix",
