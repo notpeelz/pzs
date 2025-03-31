@@ -146,19 +146,22 @@ pub async fn read_applications() -> Result<Vec<Application>> {
       let desktop_path = entry.into_path();
 
       let desktop_file = match {
-        let r = tokio::fs::File::open(&desktop_path).await?;
-
-        Application::from_reader(&app_id, r)
-          .await
-          .wrap_err("invalid desktop file")
+        let file = match tokio::fs::File::open(&desktop_path).await {
+          Ok(file) => file,
+          Err(err) => {
+            warn!("failed to read desktop file {desktop_path:?}: {err:?}");
+            continue;
+          },
+        };
+        Application::from_reader(&app_id, file).await
       } {
         Ok(f) => f,
-        Err(r) => {
-          let r = r.wrap_err(format!(
+        Err(err) => {
+          let err = err.wrap_err(format!(
             "failed to read desktop file: {}",
             desktop_path.to_string_lossy()
           ));
-          warn!("{r}");
+          warn!("{err}");
           continue;
         },
       };
