@@ -11,12 +11,14 @@ use rustix::pipe::{pipe_with, PipeFlags};
 use tracing::{trace, warn};
 
 pub fn spawn(
+  workdir: impl AsRef<Path>,
   command: impl AsRef<OsStr>,
   args: impl IntoIterator<Item = impl AsRef<OsStr>>,
 ) {
   let command = command.as_ref().to_owned();
   let mut process = Command::new(&command);
   process
+    .current_dir(workdir.as_ref())
     .args(args)
     .stdin(Stdio::null())
     .stdout(Stdio::null())

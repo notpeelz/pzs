@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use crate::{
   shell::shell_parse_args,
   xdg, XDG_CURRENT_DESKTOP,
 };
-use eyre::{bail, Result};
+use eyre::{bail, Context, Result};
 use gio::{
   glib,
   prelude::{ListModelExt, ObjectExt},
@@ -219,6 +220,18 @@ fn update_list_view(
 
 impl AppLauncher {
   async fn launch_app(&self, app: &AppItem) -> Result<()> {
+    let mut workdir = app.0.path.as_ref().map(PathBuf::from);
+    if workdir
+      .as_ref()
+      .is_some_and(|x| x.as_os_str().is_empty())
+    {
+      workdir = None;
+    }
+    if workdir.as_ref().is_some_and(|x| !x.is_dir()) {
+      bail!("the Path property isn't a valid directory");
+    }
+    let workdir = workdir.map_or_else(std::env::current_dir, |x| Ok(x))?;
+
     let exec = app.0.expand_exec(&[])?;
     let (exe, args) = {
       let mut v = shell_parse_args(&exec);
@@ -230,9 +243,9 @@ impl AppLauncher {
       (v[0].clone(), args)
     };
 
-    debug!(?exec, ?exe, ?args, "launching app");
+    debug!(?exec, ?workdir, ?exe, ?args, "launching app");
 
-    crate::spawning::spawn(exe, args);
+    crate::spawning::spawn(workdir, exe, args);
 
     Ok(())
   }

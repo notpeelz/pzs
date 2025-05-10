@@ -23,6 +23,7 @@ pub struct Application {
   pub no_display: Option<bool>,
   pub icon: Option<String>,
   pub name: Option<String>,
+  pub path: Option<String>,
   pub exec: Option<String>,
   pub keywords: Option<Vec<String>>,
   pub only_show_in: Option<Vec<String>>,
@@ -67,6 +68,10 @@ impl Application {
 
     let icon = entry.get("Icon").map(|x| x.to_owned());
     let name = entry.get("Name").map(|x| x.to_owned());
+    let path = entry
+      .get("Path")
+      .map(|x| parse_property_string(x))
+      .transpose()?;
     let exec = entry
       .get("Exec")
       .map(|x| parse_property_string(x))
@@ -87,6 +92,7 @@ impl Application {
       no_display,
       icon,
       name,
+      path,
       exec,
       keywords,
       only_show_in,
