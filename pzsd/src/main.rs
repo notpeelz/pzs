@@ -35,7 +35,7 @@ fn main() {
   tracing_subscriber::fmt()
     .compact()
     .with_env_filter({
-      let directives = std::env::var("RUST_LOG")
+      let directives = std::env::var("PZSD_LOG")
         .unwrap_or_else(|_| DEFAULT_LOG_FILTER.to_owned());
       EnvFilter::builder().parse_lossy(directives)
     })
