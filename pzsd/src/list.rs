@@ -1,14 +1,8 @@
-//! Idiomatic and high-level abstraction over [`gtk::ListView`].
-
 #![allow(dead_code)]
 
-// use super::{get_mut_value, Filter, OrdFn, RelmSelectionExt, TypedListItem};
-// use gtk::{
-//   gio, glib,
-//   prelude::{
-//     Cast, CastNone, FilterExt, IsA, ListItemExt, ListModelExt, ObjectExt,
-//   },
-// };
+//! Modified version of relm4/src/typed_view/list.rs
+//! Supports passing a custom sorter function
+
 use std::cell::Ref;
 use std::marker::PhantomData;
 use std::{any::Any, cell::RefMut};
@@ -108,18 +102,11 @@ impl<T: std::fmt::Debug, S: std::fmt::Debug> std::fmt::Debug
   }
 }
 
-// pub type OrdFn<T> = Option<Box<dyn Fn(&T, &T) -> std::cmp::Ordering>>;
-
 struct Filter {
   filter: gtk::CustomFilter,
   model: gtk::FilterListModel,
 }
 
-/// And item of a [`list::TypedListView`].
-///
-/// The interface is very similar to [`std::cell::RefCell`].
-/// Ownership is calculated at runtime, so you have to borrow the
-/// value explicitly which might panic if done incorrectly.
 #[derive(Debug, Clone)]
 pub struct TypedListItem<T> {
   inner: glib::BoxedAnyObject,
@@ -134,36 +121,11 @@ impl<T: 'static> TypedListItem<T> {
     }
   }
 
-  // rustdoc-stripper-ignore-next
-  /// Immutably borrows the wrapped value.
-  ///
-  /// The borrow lasts until the returned `Ref` exits scope. Multiple
-  /// immutable borrows can be taken out at the same time.
-  ///
-  /// # Panics
-  ///
-  /// Panics if the value is currently mutably borrowed.
-  ///
-  /// For a non-panicking variant, use
-  /// [`try_borrow`](#method.try_borrow).
   #[must_use]
   pub fn borrow(&self) -> Ref<'_, T> {
     self.inner.borrow()
   }
 
-  // rustdoc-stripper-ignore-next
-  /// Mutably borrows the wrapped value.
-  ///
-  /// The borrow lasts until the returned `RefMut` or all `RefMut`s derived
-  /// from it exit scope. The value cannot be borrowed while this borrow is
-  /// active.
-  ///
-  /// # Panics
-  ///
-  /// Panics if the value is currently borrowed.
-  ///
-  /// For a non-panicking variant, use
-  /// [`try_borrow_mut`](#method.try_borrow_mut).
   #[must_use]
   pub fn borrow_mut(&self) -> RefMut<'_, T> {
     self.inner.borrow_mut()
@@ -260,10 +222,6 @@ where
     }
   }
 
-  /// Add a function to filter the stored items.
-  /// Returning `false` will simply hide the item.
-  ///
-  /// Note that several filters can be added on top of each other.
   pub fn add_filter<F: Fn(&T) -> bool + 'static>(&mut self, f: F) {
     let filter = gtk::CustomFilter::new(move |obj| {
       let value = get_value::<T>(obj);
@@ -280,12 +238,10 @@ where
     self.update_model();
   }
 
-  /// Returns the amount of filters that were added.
   pub fn filters_len(&self) -> usize {
     self.filters.len()
   }
 
-  /// Set a certain filter as active or inactive.
   pub fn set_filter_status(&mut self, idx: usize, active: bool) -> bool {
     if let Some(filter) = self.filters.get(idx) {
       if active {
@@ -301,10 +257,6 @@ where
     }
   }
 
-  /// Notify that a certain filter has changed.
-  /// This causes the filter expression to be re-evaluated.
-  ///
-  /// Returns true if a filter was notified.
   pub fn notify_filter_changed(&self, idx: usize) -> bool {
     if let Some(filter) = self.filters.get(idx) {
       filter
@@ -316,31 +268,17 @@ where
     }
   }
 
-  /// Remove the last filter.
-  pub fn pop_filter(&mut self) {
-    // let filter = self.filters.pop();
-    // if let Some(filter) = filter {
-    //   self.active_model = filter.model.model().unwrap();
-    //   self
-    //     .selection_model
-    //     .set_list_model(&self.active_model);
-    // }
-  }
-
-  /// Remove all filters.
   pub fn clear_filters(&mut self) {
     self.filters.clear();
     self.update_model();
   }
 
-  /// Add a new item at the end of the list.
   pub fn append(&mut self, value: T) {
     self
       .store
       .append(&glib::BoxedAnyObject::new(value));
   }
 
-  /// Add new items from an iterator the the end of the list.
   pub fn extend_from_iter<I: IntoIterator<Item = T>>(&mut self, init: I) {
     let objects: Vec<glib::BoxedAnyObject> = init
       .into_iter()
@@ -349,7 +287,6 @@ where
     self.store.extend_from_slice(&objects);
   }
 
-  /// Find the index of the first item that matches a certain function.
   pub fn find<F: FnMut(&T) -> bool>(&self, mut equal_func: F) -> Option<u32> {
     self.store.find_with_equal_func(move |obj| {
       let value = get_value::<T>(obj);
@@ -357,19 +294,14 @@ where
     })
   }
 
-  /// Returns true if the list is empty.
   pub fn is_empty(&self) -> bool {
     self.len() == 0
   }
 
-  /// Returns the length of the list (without filters).
   pub fn len(&self) -> u32 {
     self.store.n_items()
   }
 
-  /// Get the [`TypedListItem`] at the specified position.
-  ///
-  /// Returns [`None`] if the position is invalid.
   pub fn get(&self, position: u32) -> Option<TypedListItem<T>> {
     if let Some(obj) = self.store.item(position) {
       let wrapper = obj.downcast::<glib::BoxedAnyObject>().unwrap();
@@ -379,10 +311,6 @@ where
     }
   }
 
-  /// Get the visible [`TypedListItem`] at the specified position,
-  /// (the item at the given position after filtering and sorting).
-  ///
-  /// Returns [`None`] if the position is invalid.
   pub fn get_visible(&self, position: u32) -> Option<TypedListItem<T>> {
     if let Some(obj) = self.active_model.item(position) {
       let wrapper = obj.downcast::<glib::BoxedAnyObject>().unwrap();
@@ -392,15 +320,12 @@ where
     }
   }
 
-  /// Insert an item at a specific position.
   pub fn insert(&mut self, position: u32, value: T) {
     self
       .store
       .insert(position, &glib::BoxedAnyObject::new(value));
   }
 
-  /// Insert an item into the list and calculate its position from
-  /// a sorting function.
   pub fn insert_sorted<F: FnMut(&T, &T) -> std::cmp::Ordering>(
     &self,
     value: T,
@@ -419,12 +344,10 @@ where
     self.store.insert_sorted(&item, compare)
   }
 
-  /// Remove an item at a specific position.
   pub fn remove(&mut self, position: u32) {
     self.store.remove(position);
   }
 
-  /// Remove all items.
   pub fn clear(&mut self) {
     self.store.remove_all();
   }

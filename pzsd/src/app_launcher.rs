@@ -8,7 +8,7 @@ use crate::{
   shell::shell_parse_args,
   xdg, XDG_CURRENT_DESKTOP,
 };
-use eyre::{bail, Context, Result};
+use eyre::{bail, Result};
 use gio::{
   glib,
   prelude::{ListModelExt, ObjectExt},
