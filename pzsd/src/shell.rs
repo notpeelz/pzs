@@ -1,3 +1,4 @@
+// SEE ~/code/public/glib/glib/gshell.c
 fn tokenize_command<S: AsRef<str>>(s: S) -> Vec<String> {
   let s = s.as_ref();
 
@@ -156,6 +157,7 @@ pub fn shell_quote<S: AsRef<str>>(s: S) -> String {
 
 pub fn shell_unquote<S: AsRef<str>>(s: S) -> String {
   let s = s.as_ref();
+  // TODO: don't use gio
   gio::glib::shell_unquote(s)
     .unwrap()
     .to_string_lossy()

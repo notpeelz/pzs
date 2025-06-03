@@ -108,6 +108,9 @@ impl Application {
   }
 }
 
+// TODO: TryExec=
+// TODO: Hidden= (skip entirely)
+
 pub async fn read_applications() -> Result<Vec<Application>> {
   let mut m = HashMap::<String, Application>::new();
   for d in BASEDIRS.find_data_files("applications") {
@@ -222,6 +225,18 @@ impl ApplicationParameter {
   }
 }
 
+// 1. g_key_file_parse_value_as_string - replace \n, \s, \t, etc (s,n,t,r,\,0)
+// 2. expand_application_parameters - substitute field codes (%f, etc)
+// 2.1
+//   /* No file substitutions */
+//   if (uri_list == *uris && uri_list != NULL)
+//   {
+//     /* If there is no macro default to %f. This is also what KDE does */
+//     g_string_append_c (expanded_exec, ' ');
+//     expand_macro ('f', expanded_exec, info, uris);
+//   }
+// 3. g_shell_parse_argv - split into arg array
+
 pub fn expand_application_parameters<S: AsRef<str>>(
   s: S,
   params: &[ApplicationParameter],
@@ -284,6 +299,15 @@ pub fn expand_application_parameters<S: AsRef<str>>(
             )
           }
         },
+        // 'i' => {
+        //   todo!()
+        // },
+        // 'c' => {
+        //   todo!()
+        // },
+        // 'k' => {
+        //   todo!()
+        // },
         _ => {},
       }
     } else {

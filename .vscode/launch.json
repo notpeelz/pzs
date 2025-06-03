@@ -1,0 +1,89 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'pzsd'",
+      "cargo": {
+        "args": ["build", "--bin=pzsd", "--package=pzsd"],
+        "filter": {
+          "name": "pzsd",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'pzsd'",
+      "cargo": {
+        "args": ["test", "--no-run", "--bin=pzsd", "--package=pzsd"],
+        "filter": {
+          "name": "pzsd",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'pzsc'",
+      "cargo": {
+        "args": ["build", "--bin=pzsc", "--package=pzsc"],
+        "filter": {
+          "name": "pzsc",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'pzsc'",
+      "cargo": {
+        "args": ["test", "--no-run", "--bin=pzsc", "--package=pzsc"],
+        "filter": {
+          "name": "pzsc",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'blah'",
+      "cargo": {
+        "args": ["build", "--bin=blah", "--package=blah"],
+        "filter": {
+          "name": "blah",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'blah'",
+      "cargo": {
+        "args": ["test", "--no-run", "--bin=blah", "--package=blah"],
+        "filter": {
+          "name": "blah",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
