@@ -1,0 +1,12 @@
+[Unit]
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pzsd
+Restart=on-failure
+StandardError=journal
+Slice=app-graphical.slice
+
+[Install]
+WantedBy=graphical-session.target
