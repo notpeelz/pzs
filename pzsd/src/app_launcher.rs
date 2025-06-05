@@ -636,7 +636,7 @@ async fn watch_apps(mut messenger: Messenger) {
         handle_notify(r);
         continue;
       },
-      _ = tokio::time::sleep(Duration::from_secs(5)) => {
+      _ = tokio::time::sleep(Duration::from_secs(1)) => {
         if !dirty.load(std::sync::atomic::Ordering::SeqCst) {
           continue;
         }
