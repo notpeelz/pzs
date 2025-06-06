@@ -612,6 +612,12 @@ async fn watch_apps(mut messenger: Messenger) {
       .unwrap();
   }
 
+  for d in xdg::BASEDIRS.find_data_files("icons") {
+    watcher
+      .watch(&*d, notify::RecursiveMode::Recursive)
+      .unwrap();
+  }
+
   let dirty = AtomicBool::new(false);
   loop {
     let handle_notify = {
