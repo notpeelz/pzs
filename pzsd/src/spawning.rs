@@ -42,6 +42,7 @@ pub fn spawn(
   });
 }
 
+// Taken from https://github.com/niri-wm/niri/blob/54c2e2ab476629d17fdba861895f58e7cdac32ab/src/utils/spawning.rs#L173
 fn do_spawn(command: &OsStr, mut process: Command) -> Option<Child> {
   use libc::close_range;
 
