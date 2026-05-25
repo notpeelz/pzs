@@ -1,4 +1,5 @@
-use std::{future::Future, str::FromStr};
+use std::future::Future;
+use std::str::FromStr;
 
 use eyre::{Context, Result};
 use tokio::sync::broadcast;
