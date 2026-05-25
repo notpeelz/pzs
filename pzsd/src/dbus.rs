@@ -13,7 +13,6 @@ pub enum Msg {
   AppLauncherMsg(AppLauncherMsg),
 }
 
-#[allow(dead_code)]
 pub struct Messenger {
   rx: Option<broadcast::Receiver<Msg>>,
   tx: broadcast::Sender<Msg>,
